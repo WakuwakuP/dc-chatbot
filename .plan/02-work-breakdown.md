@@ -82,6 +82,7 @@
 - 対象: `apps/api`
 - 内容:
   - Cloudflare Workers app
+  - Workers-compatible Elysia setup
   - health endpoint
   - `/api/v1/owner/*` と `/api/v1/bot/*` route group skeleton
   - dev-only auth guard skeleton
@@ -93,7 +94,9 @@
 
 - 対象: `apps/web`
 - 内容:
-  - Cloudflare Pages frontend skeleton
+  - Vite + React + React Router frontend skeleton
+  - Tailwind CSS setup
+  - shadcn/ui init と最小 component 追加
   - minimal Owner UI shell
   - API client skeleton using `packages/shared`
 - 完了条件:
@@ -291,6 +294,7 @@
 
 - 対象: README or package README
 - 内容:
+  - Docker Compose local startup
   - local auth bypass
   - dev Bot token safety rails
   - local D1 migration

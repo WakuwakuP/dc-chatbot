@@ -1,0 +1,28 @@
+{
+  "name": "dc-chatbot",
+  "private": true,
+  "packageManager": "pnpm@10.25.0",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "check": "pnpm -r --filter @dc-chatbot/shared --filter @dc-chatbot/domain --filter @dc-chatbot/data --filter @dc-chatbot/provider --filter @dc-chatbot/api --filter @dc-chatbot/bot --filter @dc-chatbot/web --if-present check",
+    "build": "pnpm -r --filter @dc-chatbot/shared --filter @dc-chatbot/domain --filter @dc-chatbot/data --filter @dc-chatbot/provider --filter @dc-chatbot/api --filter @dc-chatbot/bot --filter @dc-chatbot/web --if-present build",
+    "lint": "oxlint . --ignore-path .oxlintignore",
+    "format": "prettier --write \"apps/{api,bot,web}/**/*.{ts,tsx,js,json,md,css,yml,yaml}\" \"packages/**/*.{ts,tsx,js,json,md,css,yml,yaml}\" \".github/**/*.{yml,yaml}\" \"docs/{deploy,development}/**/*.md\" docs/adr/README.md docs/adr/0057-use-vite-react-router-tailwind-shadcn-for-web-frontend.md docker-compose.yml README.md package.json pnpm-workspace.yaml tsconfig.base.json tsconfig.json vitest.config.ts --ignore-path .prettierignore",
+    "format:check": "prettier --check \"apps/{api,bot,web}/**/*.{ts,tsx,js,json,md,css,yml,yaml}\" \"packages/**/*.{ts,tsx,js,json,md,css,yml,yaml}\" \".github/**/*.{yml,yaml}\" \"docs/{deploy,development}/**/*.md\" docs/adr/README.md docs/adr/0057-use-vite-react-router-tailwind-shadcn-for-web-frontend.md docker-compose.yml README.md package.json pnpm-workspace.yaml tsconfig.base.json tsconfig.json vitest.config.ts --ignore-path .prettierignore",
+    "test": "pnpm test:unit && pnpm test:e2e",
+    "test:unit": "pnpm -r --filter @dc-chatbot/shared --filter @dc-chatbot/domain --filter @dc-chatbot/data --filter @dc-chatbot/provider --filter @dc-chatbot/bot --if-present test:unit",
+    "test:e2e": "pnpm -r --filter @dc-chatbot/api --filter @dc-chatbot/web --if-present test:e2e",
+    "spike:check": "pnpm --filter api-spike check",
+    "spike:build": "pnpm --filter api-spike build",
+    "spike:dev": "pnpm --filter api-spike dev"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "oxlint": "^1.28.0",
+    "prettier": "^3.4.2",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

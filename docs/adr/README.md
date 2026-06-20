@@ -60,13 +60,13 @@
 
 - pnpm workspace で `apps/*` と `packages/*` を分けます。
 - `apps/api` は Cloudflare Workers API として、auth、D1、credential handling、provider calls、audit を所有します。
-- `apps/web` は Cloudflare Pages frontend として、Owner Discord User 向け management UI を所有します。
+- `apps/web` は Cloudflare Pages frontend として、Vite + React + React Router + Tailwind CSS + shadcn/ui の Owner Discord User 向け management UI を所有します。
 - `apps/bot` は Node.js + `discord.js` の Bot Worker として、Discord Gateway と返信投稿を所有します。
 - `packages/shared` は API/Web/Bot 間 DTO と Valibot schemas を所有します。
 - `packages/domain`、`packages/data`、`packages/provider` は runtime 非依存 domain helper、Drizzle ORM による D1 data access、provider adapter の境界として使います。
 - `apps/api-spike` は compatibility/reference spike であり、production directory structure の中心として扱いません。
 
-関連 ADR: 0022, 0023, 0025, 0027, 0049, 0052, 0056
+関連 ADR: 0022, 0023, 0025, 0027, 0049, 0052, 0056, 0057
 
 ### Data layer / D1 / tooling
 
@@ -82,64 +82,65 @@
 
 ## ADR 一覧
 
-| ADR | 決定 |
-| --- | --- |
-| [0001](0001-store-chatgpt-credentials-encrypted-in-d1.md) | Store ChatGPT credentials encrypted in D1 |
-| [0002](0002-use-per-user-data-encryption-keys.md) | Use per-user data encryption keys |
-| [0003](0003-use-cloudflare-secrets-for-master-key.md) | Use Cloudflare secrets for master key |
-| [0004](0004-host-control-plane-on-cloudflare-behind-zero-trust.md) | Host control plane on Cloudflare behind Zero Trust |
-| [0005](0005-run-discord-bot-worker-as-node-process.md) | Run Discord bot worker as Node process |
-| [0006](0006-authenticate-bot-worker-with-cloudflare-access-service-token.md) | Authenticate Bot Worker with Cloudflare Access service token |
-| [0007](0007-store-discord-allowlist-in-d1.md) | Store Discord allowlist in D1 |
-| [0008](0008-derive-conversation-context-from-discord.md) | Derive conversation context from Discord |
-| [0009](0009-use-user-chatgpt-connection-for-response-decisions.md) | Use effective ChatGPT connection for response decisions |
-| [0010](0010-use-owner-chatgpt-connection-for-members-in-mvp.md) | Use owner ChatGPT connection for members in MVP |
-| [0011](0011-owner-manages-registered-members.md) | Owner manages registered members |
-| [0012](0012-owner-only-management-web-in-mvp.md) | Owner-only management web in MVP |
-| [0013](0013-support-manual-and-candidate-member-registration.md) | Support manual and candidate member registration |
-| [0014](0014-record-visible-message-authors-as-candidates.md) | Record visible message authors as candidates |
-| [0015](0015-enable-discord-message-content-intent.md) | Enable Discord Message Content Intent |
-| [0016](0016-call-chatgpt-codex-backend-from-serverless-api.md) | Call ChatGPT Codex backend from serverless API |
-| [0017](0017-stream-internally-but-post-final-discord-reply.md) | Stream internally but post final Discord reply |
-| [0018](0018-split-long-discord-replies-during-streaming.md) | Split long Discord replies during streaming |
-| [0019](0019-select-conversation-context-by-discord-conversation-boundary.md) | Select conversation context by Discord conversation boundary |
-| [0020](0020-allow-visible-non-member-messages-in-conversation-context.md) | Allow visible non-member messages in conversation context |
-| [0021](0021-ignore-non-members-and-notify-owner.md) | Ignore non-members and notify the owner |
-| [0022](0022-split-cloudflare-workers-api-and-pages-frontend.md) | Split Cloudflare Workers API and Pages frontend |
-| [0023](0023-separate-owner-and-bot-api-routes.md) | Separate owner and bot API routes |
-| [0024](0024-use-dev-only-auth-headers-locally.md) | Use dev-only auth headers locally |
-| [0025](0025-use-pnpm-workspace-and-workers-compatible-elysia.md) | Use pnpm workspace and Workers-compatible Elysia |
-| [0026](0026-spike-zenstack-on-cloudflare-workers-d1.md) | Spike ZenStack on Cloudflare Workers and D1 |
-| [0027](0027-keep-bot-worker-db-access-behind-api.md) | Keep Bot Worker DB access behind API |
-| [0028](0028-use-message-intake-endpoint-for-bot-events.md) | Use message intake endpoint for bot events |
-| [0029](0029-send-message-content-to-intake.md) | Send message content to intake |
-| [0030](0030-fetch-recent-discord-messages-after-intake-decision.md) | Fetch recent Discord messages after intake decision |
-| [0031](0031-use-two-stage-response-decisions.md) | Use two-stage response decisions |
-| [0032](0032-store-request-audit-metadata-only.md) | Store request audit metadata only |
-| [0033](0033-lazily-refresh-chatgpt-credentials.md) | Lazily refresh ChatGPT credentials |
-| [0034](0034-notify-owner-when-chatgpt-connection-needs-reconnect.md) | Notify the owner when ChatGPT connection needs reconnect |
-| [0035](0035-separate-d1-tables-by-lifecycle.md) | Separate D1 tables by lifecycle |
-| [0036](0036-support-multiple-owners-and-member-connection-assignment.md) | Support multiple owners and member connection assignment |
-| [0037](0037-use-admin-and-regular-owner-roles.md) | Use admin and regular owner roles |
-| [0038](0038-assign-regular-owner-registrations-to-self.md) | Assign regular-owner registrations to self |
-| [0039](0039-store-connection-metadata-history-only.md) | Store connection metadata history only |
-| [0040](0040-map-cloudflare-access-identity-to-owner.md) | Map Cloudflare Access identity to owner records |
-| [0041](0041-store-model-settings-in-database.md) | Store model settings in the database |
-| [0042](0042-separate-prompt-settings-from-bot-settings.md) | Separate prompt settings from singleton bot settings |
-| [0043](0043-audit-important-setting-changes.md) | Audit important setting changes as metadata |
-| [0044](0044-run-local-bot-by-default-with-dev-safety-rails.md) | Run local bot by default with dev safety rails |
-| [0045](0045-support-discord-image-vision-without-persisting-images.md) | Support Discord image vision without persisting images |
-| [0046](0046-support-limited-text-attachments-without-persisting-content.md) | Support limited text attachments without persisting content |
-| [0047](0047-ignore-automated-discord-sources-by-default.md) | Ignore automated Discord sources by default |
-| [0048](0048-log-metadata-only.md) | Log metadata only |
-| [0049](0049-share-dto-schemas-with-valibot.md) | Share DTO schemas with Valibot |
-| [0050](0050-use-oxlint-and-oxfmt-with-biome-fallback.md) | Use Oxlint and Oxfmt with Biome fallback |
-| [0051](0051-automate-d1-migrations-with-forward-only-policy.md) | Automate D1 migrations with a forward-only policy |
-| [0052](0052-use-provider-adapter-for-chatgpt-subscription-backend.md) | Use a provider adapter for the ChatGPT subscription backend |
-| [0053](0053-use-scheduled-cleanup-for-retention.md) | Use scheduled cleanup for retention |
-| [0054](0054-store-selected-context-message-ids-separately.md) | Store selected context message IDs separately |
-| [0055](0055-use-targeted-d1-indexes-and-core-foreign-keys.md) | Use targeted D1 indexes and core foreign keys |
-| [0056](0056-use-drizzle-for-d1-data-layer.md) | Use Drizzle ORM for the D1 data layer |
+| ADR                                                                          | 決定                                                                            |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| [0001](0001-store-chatgpt-credentials-encrypted-in-d1.md)                    | Store ChatGPT credentials encrypted in D1                                       |
+| [0002](0002-use-per-user-data-encryption-keys.md)                            | Use per-user data encryption keys                                               |
+| [0003](0003-use-cloudflare-secrets-for-master-key.md)                        | Use Cloudflare secrets for master key                                           |
+| [0004](0004-host-control-plane-on-cloudflare-behind-zero-trust.md)           | Host control plane on Cloudflare behind Zero Trust                              |
+| [0005](0005-run-discord-bot-worker-as-node-process.md)                       | Run Discord bot worker as Node process                                          |
+| [0006](0006-authenticate-bot-worker-with-cloudflare-access-service-token.md) | Authenticate Bot Worker with Cloudflare Access service token                    |
+| [0007](0007-store-discord-allowlist-in-d1.md)                                | Store Discord allowlist in D1                                                   |
+| [0008](0008-derive-conversation-context-from-discord.md)                     | Derive conversation context from Discord                                        |
+| [0009](0009-use-user-chatgpt-connection-for-response-decisions.md)           | Use effective ChatGPT connection for response decisions                         |
+| [0010](0010-use-owner-chatgpt-connection-for-members-in-mvp.md)              | Use owner ChatGPT connection for members in MVP                                 |
+| [0011](0011-owner-manages-registered-members.md)                             | Owner manages registered members                                                |
+| [0012](0012-owner-only-management-web-in-mvp.md)                             | Owner-only management web in MVP                                                |
+| [0013](0013-support-manual-and-candidate-member-registration.md)             | Support manual and candidate member registration                                |
+| [0014](0014-record-visible-message-authors-as-candidates.md)                 | Record visible message authors as candidates                                    |
+| [0015](0015-enable-discord-message-content-intent.md)                        | Enable Discord Message Content Intent                                           |
+| [0016](0016-call-chatgpt-codex-backend-from-serverless-api.md)               | Call ChatGPT Codex backend from serverless API                                  |
+| [0017](0017-stream-internally-but-post-final-discord-reply.md)               | Stream internally but post final Discord reply                                  |
+| [0018](0018-split-long-discord-replies-during-streaming.md)                  | Split long Discord replies during streaming                                     |
+| [0019](0019-select-conversation-context-by-discord-conversation-boundary.md) | Select conversation context by Discord conversation boundary                    |
+| [0020](0020-allow-visible-non-member-messages-in-conversation-context.md)    | Allow visible non-member messages in conversation context                       |
+| [0021](0021-ignore-non-members-and-notify-owner.md)                          | Ignore non-members and notify the owner                                         |
+| [0022](0022-split-cloudflare-workers-api-and-pages-frontend.md)              | Split Cloudflare Workers API and Pages frontend                                 |
+| [0023](0023-separate-owner-and-bot-api-routes.md)                            | Separate owner and bot API routes                                               |
+| [0024](0024-use-dev-only-auth-headers-locally.md)                            | Use dev-only auth headers locally                                               |
+| [0025](0025-use-pnpm-workspace-and-workers-compatible-elysia.md)             | Use pnpm workspace and Workers-compatible Elysia                                |
+| [0026](0026-spike-zenstack-on-cloudflare-workers-d1.md)                      | Spike ZenStack on Cloudflare Workers and D1                                     |
+| [0027](0027-keep-bot-worker-db-access-behind-api.md)                         | Keep Bot Worker DB access behind API                                            |
+| [0028](0028-use-message-intake-endpoint-for-bot-events.md)                   | Use message intake endpoint for bot events                                      |
+| [0029](0029-send-message-content-to-intake.md)                               | Send message content to intake                                                  |
+| [0030](0030-fetch-recent-discord-messages-after-intake-decision.md)          | Fetch recent Discord messages after intake decision                             |
+| [0031](0031-use-two-stage-response-decisions.md)                             | Use two-stage response decisions                                                |
+| [0032](0032-store-request-audit-metadata-only.md)                            | Store request audit metadata only                                               |
+| [0033](0033-lazily-refresh-chatgpt-credentials.md)                           | Lazily refresh ChatGPT credentials                                              |
+| [0034](0034-notify-owner-when-chatgpt-connection-needs-reconnect.md)         | Notify the owner when ChatGPT connection needs reconnect                        |
+| [0035](0035-separate-d1-tables-by-lifecycle.md)                              | Separate D1 tables by lifecycle                                                 |
+| [0036](0036-support-multiple-owners-and-member-connection-assignment.md)     | Support multiple owners and member connection assignment                        |
+| [0037](0037-use-admin-and-regular-owner-roles.md)                            | Use admin and regular owner roles                                               |
+| [0038](0038-assign-regular-owner-registrations-to-self.md)                   | Assign regular-owner registrations to self                                      |
+| [0039](0039-store-connection-metadata-history-only.md)                       | Store connection metadata history only                                          |
+| [0040](0040-map-cloudflare-access-identity-to-owner.md)                      | Map Cloudflare Access identity to owner records                                 |
+| [0041](0041-store-model-settings-in-database.md)                             | Store model settings in the database                                            |
+| [0042](0042-separate-prompt-settings-from-bot-settings.md)                   | Separate prompt settings from singleton bot settings                            |
+| [0043](0043-audit-important-setting-changes.md)                              | Audit important setting changes as metadata                                     |
+| [0044](0044-run-local-bot-by-default-with-dev-safety-rails.md)               | Run local bot by default with dev safety rails                                  |
+| [0045](0045-support-discord-image-vision-without-persisting-images.md)       | Support Discord image vision without persisting images                          |
+| [0046](0046-support-limited-text-attachments-without-persisting-content.md)  | Support limited text attachments without persisting content                     |
+| [0047](0047-ignore-automated-discord-sources-by-default.md)                  | Ignore automated Discord sources by default                                     |
+| [0048](0048-log-metadata-only.md)                                            | Log metadata only                                                               |
+| [0049](0049-share-dto-schemas-with-valibot.md)                               | Share DTO schemas with Valibot                                                  |
+| [0050](0050-use-oxlint-and-oxfmt-with-biome-fallback.md)                     | Use Oxlint and Oxfmt with Biome fallback                                        |
+| [0051](0051-automate-d1-migrations-with-forward-only-policy.md)              | Automate D1 migrations with a forward-only policy                               |
+| [0052](0052-use-provider-adapter-for-chatgpt-subscription-backend.md)        | Use a provider adapter for the ChatGPT subscription backend                     |
+| [0053](0053-use-scheduled-cleanup-for-retention.md)                          | Use scheduled cleanup for retention                                             |
+| [0054](0054-store-selected-context-message-ids-separately.md)                | Store selected context message IDs separately                                   |
+| [0055](0055-use-targeted-d1-indexes-and-core-foreign-keys.md)                | Use targeted D1 indexes and core foreign keys                                   |
+| [0056](0056-use-drizzle-for-d1-data-layer.md)                                | Use Drizzle ORM for the D1 data layer                                           |
+| [0057](0057-use-vite-react-router-tailwind-shadcn-for-web-frontend.md)       | Use Vite, React, React Router, Tailwind CSS, and shadcn/ui for the web frontend |
 
 ## 新しい ADR を追加するとき
 

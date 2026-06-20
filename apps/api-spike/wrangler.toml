@@ -1,0 +1,9 @@
+name = "dc-chatbot-api-spike"
+main = "src/index.ts"
+compatibility_date = "2026-06-19"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "dc-chatbot-spike"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"

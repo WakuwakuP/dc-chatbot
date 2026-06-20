@@ -7,9 +7,9 @@
 作成対象:
 
 ```text
-apps/api/        # Cloudflare Workers API
-apps/web/        # Cloudflare Pages frontend
-apps/bot/        # Node.js + discord.js Bot Worker
+apps/api/        # Cloudflare Workers API with Workers-compatible Elysia
+apps/web/        # Cloudflare Pages frontend with Vite + React + React Router + Tailwind CSS + shadcn/ui
+apps/bot/        # Node.js LTS + discord.js Bot Worker
 packages/shared/ # DTO types + Valibot schemas
 packages/domain/ # runtime independent domain helpers
 packages/data/   # D1 schema / migrations / repositories
@@ -26,14 +26,19 @@ packages/provider/ # ChatGPT/Codex provider adapter
 
 ## 既存 ADR からの制約
 
-- API は Cloudflare Workers 互換を維持し、Bun 固有 API に依存しない。
-- Web は Cloudflare Pages frontend として構築する。
+- API は Cloudflare Workers 互換の Elysia backend とし、Bun 固有 API に依存しない。
+- Web は Cloudflare Pages frontend として構築し、Vite + React + React Router + Tailwind CSS + shadcn/ui を使う。
 - Bot Worker は長寿命 Node.js process として実行する。
 - Bot Worker は D1 / credential / provider backend に直接アクセスしない。
 - Owner routes は `/api/v1/owner/*`、Bot routes は `/api/v1/bot/*` に分離する。
 - DTO は `packages/shared` で Valibot schema と TypeScript type を共有する。
 - Provider-specific protocol と token handling は `packages/provider` に閉じ込める。
 - 保存・ログ出力は metadata-only とする。
+
+## Local development assumptions
+
+- Local development は Docker Compose で API / Web / Bot / local D1 workflow を立ち上げやすくする。
+- Bot service は real Discord Gateway に接続するため、local では production Bot token を使わず dev Discord Application/Bot Token と allowlist を必須にする。
 
 ## Deployment target assumptions
 

@@ -1,5 +1,0 @@
-# Separate D1 tables by lifecycle
-
-The D1 schema will use separate tables for distinct lifecycle concepts instead of storing all Discord-related state in one table. Core tables include Discord users, owners, registered members, candidate Discord users, automated trigger sources, ChatGPT subscription connections, selected context message metadata, request audit metadata, provider call audit metadata, response message metadata, setting audit metadata, maintenance run metadata, connection event metadata, and owner notification history.
-
-Candidate Discord Users are temporary discovery records with TTL, Registered Members are explicit owner-managed permission records, Automated Trigger Sources are explicitly allowed non-human trigger integrations, ChatGPT Subscription Connections have credential and reconnect lifecycle, Request Audits are analytical metadata, selected context message IDs are short-retention diagnostic metadata, and Owner Notifications are rate-limited delivery history. Keeping these concerns separate avoids mixing transient, permission, integration, credential, audit, and notification state behind one Discord user row.

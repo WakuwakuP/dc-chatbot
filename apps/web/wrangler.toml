@@ -1,8 +1,0 @@
-name = "dc-chatbot-web"
-compatibility_date = "2026-06-20"
-pages_build_output_dir = "dist"
-
-[vars]
-# Public frontend build-time value. Set the production API origin in GitHub
-# Actions variable VITE_API_BASE_URL and Cloudflare Pages environment variables.
-VITE_API_BASE_URL = "https://api.example.invalid"

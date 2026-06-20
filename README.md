@@ -1,314 +1,272 @@
-# dc-chatbot
+# RustClaw
 
-`dc-chatbot` は、Discord の Private Bot から ChatGPT/Codex subscription-backed backend を利用するためのアプリケーションです。
+[English](README.md) | [한국어](README.ko.md)
 
-Owner Discord User は自分の ChatGPT Subscription Connection を接続し、Registered Member は自分に割り当てられた Owner Discord User の ChatGPT Subscription Connection を使って bot を利用します。
+A Rust-based AI assistant built from the [NanoClaw](https://github.com/qwibitai/nanoclaw) architecture so it can run with Codex OAuth.
 
-## 設計ドキュメント
+## Why I Built This
 
-実装判断の正は ADR とドメイン用語集です。
+I liked NanoClaw's architecture and wanted to use this style of AI assistant. However, NanoClaw relies on the Claude Agent SDK, so using the Claude API is required. API cost was a concern for me, and I wanted to use my GPT Pro plan. So I reused NanoClaw's structure and developed a new assistant around it.
 
-- `CONTEXT.md` — ドメイン用語と避けたい表現
-- `docs/adr/README.md` — ADR 索引
-- `docs/adr/*.md` — 個別の設計決定
-- `docs/development/setup-and-deploy-runbook.md` — 開発環境立ち上げ・本番デプロイ手順書
-- `AGENTS.md` — このリポジトリで作業する AI agent / developer 向けルール
+## How It's Different from NanoClaw
 
-新しい実装判断が既存 ADR と矛盾する場合は、実装へ黙って合わせず、ADR の追加または更新を先に検討してください。
+- Channel: **Discord**
+- Agent runtime: uses `codex app-server` path inside a container
+- Core implementation: reimplemented the orchestrator in Rust
 
-## 本実装の目標構成
+## What RustClaw Can Do
 
-本実装は pnpm workspace の monorepo として、実行単位の `apps/*` と共有ライブラリの `packages/*` を分けます。
+- Receive messages from Discord channels and send AI replies.
+- Keep one **main channel** that works without `@AssistantName` trigger.
+- Register additional Discord channels as groups.
+- Run scheduled prompts with `cron`, `interval` (milliseconds), or `once`.
+- Manage tasks from CLI: list, pause, resume, cancel.
+- Handle advanced IPC actions: schedule tasks, register groups, enable/disable skills.
+- IPC permission rule: main group can manage all groups; non-main groups can manage only themselves.
 
-```text
-.
-├── apps/
-│   ├── api/                    # Cloudflare Workers API
-│   ├── web/                    # Cloudflare Pages frontend: Vite + React + React Router + Tailwind CSS + shadcn/ui
-│   ├── bot/                    # Discord Bot Worker: Node.js + discord.js
-│   └── api-spike/              # Drizzle + D1 検証用。production 実装の責務は持たない
-├── packages/
-│   ├── shared/                 # API/Web/Bot で共有する DTO と Valibot schemas
-│   ├── domain/                 # ドメイン型、用語、状態遷移、policy helper
-│   ├── data/                   # Drizzle ORM + D1 schema、hand-written forward-only migrations、repository helper
-│   ├── provider/               # ChatGPT/Codex subscription backend adapter
-│   └── config/                 # 共通 tsconfig / lint / format 設定が必要になれば配置
-├── docs/
-│   └── adr/                    # Architecture Decision Records
-├── CONTEXT.md                  # ドメイン用語集
-├── AGENTS.md                   # 作業ルール
-├── package.json                # workspace root scripts
-├── pnpm-workspace.yaml         # apps/* と packages/*
-└── tsconfig.base.json          # 共通 TypeScript 設定
-```
+## Installation
 
-上記のうち、現時点で存在する `apps/api-spike` は Drizzle + D1 compatibility/reference spike です。本実装の package 境界・runtime 境界・認可境界は `apps/api` / `apps/web` / `apps/bot` / `packages/*` 側で表現します。
+Requirements:
 
-## コンポーネント責務
+- Rust
+- Docker
+- Codex CLI
+- OpenAI account (active plan)
+- Discord Bot Token
 
-### `apps/api` — Cloudflare Workers API
+Install prerequisites (first-time setup):
 
-API は application boundary です。Elysia を Cloudflare Workers 互換で使い、D1、credential handling、provider calls、authorization、audit、retention cleanup をここに集約します。
-
-主な責務:
-
-- Cloudflare Access user identity の検証
-- Owner role / member access の検証
-- Bot Worker service identity の検証
-- `/api/v1/owner/*` と `/api/v1/bot/*` の提供
-- D1 への operational state / metadata 保存
-- ChatGPT Subscription Connection credential の暗号化・復号・refresh
-- Provider adapter を通した ChatGPT/Codex backend 呼び出し
-- request audit / provider audit / setting audit の metadata-only 記録
-- scheduled cleanup による retention enforcement
-
-API 実装ルール:
-
-- Cloudflare Workers 互換を維持し、Bun 固有 API に依存しません。
-- Provider-specific protocol や token handling は `packages/provider` の adapter 境界へ閉じ込めます。
-- Discord message content、prompt、response text、attachment URL/bytes、provider raw body を保存・ログ出力しません。
-
-### `apps/web` — Cloudflare Pages frontend
-
-Web は Vite + React + React Router + Tailwind CSS + shadcn/ui を使う Owner Discord User 向けの management UI です。Cloudflare Access の外側境界に加え、API 側の owner role check を前提にします。
-
-主な画面領域:
-
-- Owner / connection status
-- Registered Member management
-- Candidate Discord User promotion
-- Usage / request audit metadata graph
-- Model settings
-- Prompt settings metadata
-- Automated Trigger Source settings
-- reconnect reminder / owner notification 操作
-
-Web 実装ルール:
-
-- credential material、prompt body history、Discord message content、response text を frontend state に保持しません。
-- Admin Owner と Regular Owner の権限差を UI と API の両方で扱います。
-- Registered Member は MVP では management web にログインしません。
-
-### `apps/bot` — Discord Bot Worker
-
-Bot Worker は Discord Gateway に接続する長寿命 Node.js process です。`discord.js` を使い、Discord イベントの intake と返信投稿を担当します。
-
-主な責務:
-
-- Discord Gateway 接続
-- DM / guild mention / automated source のイベント受信
-- Discord Message Content Intent を使った trigger message の取得
-- `/api/v1/bot/messages/intake` への送信
-- API から返された context fetch plan に基づく recent Discord messages の一時取得
-- response stream endpoint への transient context 送信
-- typing indicator、最終返信、長文分割返信
-- owner notification DM の配送が API から指示された場合の実送信
-
-Bot 実装ルール:
-
-- D1 に直接アクセスしません。
-- ChatGPT credential を保持・復号・refresh しません。
-- Provider backend を直接呼びません。
-- Cloudflare Access Service Token で `/api/v1/bot/*` を呼び出します。
-- local development では production Bot token を使わず、dev guild / DM allowlist を必ず使います。
-
-### `packages/shared` — DTO と runtime validation
-
-API / Web / Bot 間の contract を共有します。
-
-主な責務:
-
-- hand-written DTO types
-- Valibot runtime schemas
-- request / response payload validation
-- safe enum / status literals
-
-Framework-specific client generation に依存せず、Cloudflare Workers bundle に載せやすい軽量 schema を優先します。
-
-### `packages/domain` — ドメインロジック
-
-実行環境に依存しない domain-level の型と helper を置きます。
-
-主な候補:
-
-- Effective ChatGPT Subscription Connection resolution
-- Owner role / Regular Owner scope 判定
-- Registered Member / Candidate Discord User status helper
-- Response Trigger / Response Decision の安全な enum
-- retention category / lifecycle category
-- user-facing Japanese message の文言 helper
-
-ここには D1 binding、Discord client、Cloudflare runtime、provider protocol を入れません。
-
-### `packages/data` — Drizzle ORM / D1 schema / migration / data access
-
-Drizzle ORM による D1 table schema、hand-written forward-only D1 migrations、repository/data access helper を集約します。ADR 0026 の ZenStack spike は判断材料として残し、production data layer は ADR 0056 に従って Drizzle ORM を採用します。
-
-主な責務:
-
-- Drizzle ORM table schema / D1 table schema
-- hand-written forward-only D1 migrations
-- targeted indexes
-- core foreign keys
-- repository / query helper
-- retention cleanup query
-
-D1 方針:
-
-- Discord snowflake ID は `TEXT`
-- audit / event / setting 系 ID は ULID text
-- timestamp は ISO 8601 UTC text
-- lifecycle ごとに table を分離
-- production migration は forward-only
-
-### `packages/provider` — ChatGPT/Codex provider adapter
-
-ChatGPT/Codex subscription-backed backend との境界です。
-
-主な責務:
-
-- connection / refresh / revoke / needsReconnect mapping
-- response generation
-- vision-capable generation
-- context selection / response decision provider call
-- provider raw error から safe error category への変換
-- provider-specific protocol と token handling の隔離
-
-Provider adapter の外へ raw request / response body や credential details を漏らさないでください。
-
-## Runtime 境界
-
-```mermaid
-flowchart TD
-    owner[Owner Discord User] --> web[apps/web\nCloudflare Pages]
-    web --> access[Cloudflare Access]
-    access --> api[apps/api\nCloudflare Workers API]
-
-    discord[Discord Gateway] --> bot[apps/bot\nNode.js + discord.js]
-    bot --> botAccess[Cloudflare Access Service Token]
-    botAccess --> api
-
-    api --> data[packages/data]
-    api --> d1[(Cloudflare D1)]
-    api --> provider[packages/provider]
-    provider --> backend[ChatGPT/Codex subscription backend]
-
-    api --> shared[packages/shared]
-    web --> shared
-    bot --> shared
-    api --> domain[packages/domain]
-    web --> domain
-    bot --> domain
-```
-
-## API route 境界
-
-```text
-/api/v1/owner/*    # Owner human routes
-/api/v1/bot/*      # Bot Worker service routes
-```
-
-Owner routes:
-
-- Cloudflare Access JWT を検証します。
-- Access subject を Owner record に map します。
-- Admin Owner / Regular Owner role を検証します。
-
-Bot routes:
-
-- Cloudflare Access Service Token の service identity を検証します。
-- Bot Worker からの intake、context plan、response stream、notification delivery 状態更新を扱います。
-
-## Message flow
-
-```mermaid
-sequenceDiagram
-    participant D as Discord
-    participant B as apps/bot
-    participant A as apps/api
-    participant P as packages/provider
-    participant C as ChatGPT/Codex backend
-
-    D->>B: Message event
-    B->>A: /api/v1/bot/messages/intake
-    A-->>B: ignore or context fetch plan
-    B->>D: Fetch recent messages if needed
-    B->>A: Send transient context to response stream
-    A->>P: Select context / decide / generate
-    P->>C: Provider call
-    C-->>P: Provider response
-    P-->>A: Safe result / safe error
-    A-->>B: Stream chunks / final result
-    B->>D: Post final or split replies
-```
-
-Message content と Conversation Context は必要時に transient に処理し、D1・logs・audit・frontend state へ保存しません。
-
-## 保存してよいもの / いけないもの
-
-保存してよいものは原則として安全な metadata のみです。
-
-例:
-
-- Discord IDs / message IDs
-- actor type
-- event type
-- status / error category
-- model
-- duration
-- request ID / provider call ID
-- attachment count / processed count / byte size metadata
-- retention cleanup target timestamp
-
-保存・ログ出力してはいけないもの:
-
-- Discord message content
-- selected Conversation Context content
-- prompt body
-- response text
-- plaintext credential material
-- ChatGPT credential history
-- attachment URLs
-- attachment bytes
-- provider raw request / response body
-
-## 実装順序の目安
-
-1. `packages/shared` に DTO と Valibot schemas を定義
-2. `packages/domain` に role/status/decision helper を定義
-3. `packages/data` に Drizzle ORM table schema、hand-written forward-only D1 migrations、repository skeleton を定義
-4. `apps/api` に owner/bot route の auth boundary と health endpoint を実装
-5. `apps/bot` に intake 呼び出しと dev safety rails を実装
-6. `apps/web` に Owner 管理 UI の最小 shell を実装
-7. Provider adapter と credential lifecycle を API 内側から接続
-8. audit metadata と scheduled cleanup を追加
-
-## Tooling
-
-- Node.js: `22` (`.node-version`)
-- Package manager: `pnpm@10.25.0`
-- Workspace: `apps/*`, `packages/*`
-- TypeScript: strict mode
-- lint/format: Oxlint/Oxfmt を初期方針、現 skeleton の format gate は `docs/development/tooling.md` に記録した理由で Prettier fallback
-
-基本コマンド:
+1. Install Rust and Cargo.
 
 ```bash
-pnpm install
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+rustc --version
+cargo --version
 ```
 
-本実装 package を追加した後は、root scripts を以下のように揃える想定です。
+2. Install Docker.
+   - macOS / Windows: install Docker Desktop: <https://docs.docker.com/desktop/>
+   - Linux: install Docker Engine: <https://docs.docker.com/engine/install/>
 
 ```bash
-pnpm check
-pnpm build
-pnpm lint
-pnpm format
-pnpm test
+docker --version
 ```
 
-## `apps/api-spike` について
+3. Install Codex CLI.
+   - Install Node.js LTS first if `npm` is not available: <https://nodejs.org/en/download>
+   - For SSH/server environments, use device auth login.
 
-`apps/api-spike` は Cloudflare Workers + Drizzle + D1 の compatibility/reference spike です。production directory structure や package responsibility の中心ではありません。
+```bash
+npm install -g @openai/codex
+codex --version
+codex login --device-auth
+```
 
-本実装の production data layer は ADR 0056 に従い、Drizzle ORM + hand-written forward-only D1 migrations を採用します。ADR 0026 は ZenStack spike の判断材料として参照し、spike で確認された D1 transaction 制限を無視しないでください。
+If you are on a local machine with a browser on the same host, you can also use:
+
+```bash
+codex login
+```
+
+Install dependencies:
+
+```bash
+cargo build
+```
+
+## Run (Recommended: host process + Docker runtime)
+
+1. Prepare environment variables.
+
+```bash
+cp .env.example .env
+```
+
+2. Set required values in `.env`.
+
+```env
+DISCORD_BOT_TOKEN=your_discord_bot_token
+AUTO_REGISTER_MAIN_JID=<discord_channel_id>@discord
+```
+
+`AUTO_REGISTER_MAIN_JID` format:
+- `<discord_channel_id>@discord`
+- example: `123456789012345678@discord`
+
+How to copy Discord channel ID:
+- Open Discord Settings -> Advanced -> turn on Developer Mode.
+- Right-click your target channel -> Copy Channel ID.
+
+If `AUTO_REGISTER_MAIN_JID` is not set, register once manually:
+
+```bash
+cargo run -- bootstrap-main --jid <channel_id>@discord
+```
+
+3. Login Codex on host (recommended for SSH/server).
+
+```bash
+codex login --device-auth
+```
+
+4. Build the agent runner container image.
+
+```bash
+docker build -t rust-claw-codex-agent:latest ./container/codex-agent-runner
+```
+
+5. Start rust-claw.
+
+```bash
+cargo run -- run
+```
+
+Or run release binary:
+
+```bash
+cargo build --release
+./target/release/rust_claw run
+```
+
+## Run As a Daemon (systemd, Linux server)
+
+Use this for production servers so rust-claw keeps running after SSH disconnect/reboot.
+
+1. Build release binary first.
+
+```bash
+cargo build --release
+```
+
+2. Run the auto installer (recommended).
+
+```bash
+sudo ./scripts/install-systemd-service.sh
+```
+
+If you need custom values:
+
+```bash
+sudo ./scripts/install-systemd-service.sh \
+  --user <linux_user> \
+  --project-root /absolute/path/to/rust-claw \
+  --service-name rust-claw
+```
+
+3. Check service status and logs.
+
+```bash
+sudo systemctl status rust-claw --no-pager
+journalctl -u rust-claw -f
+```
+
+4. Stop, restart, or disable the service.
+
+```bash
+sudo systemctl stop rust-claw
+sudo systemctl restart rust-claw
+sudo systemctl disable rust-claw
+```
+
+If you changed settings (for example `.env`) or code, rebuild and restart:
+
+```bash
+cargo build --release
+sudo systemctl restart rust-claw
+```
+
+If you started with `cargo run -- run` in a terminal, press `Ctrl+C` to stop.
+
+5. Optional manual method:
+   - Template file: `docs/systemd/rust-claw.service`
+   - Install path: `/etc/systemd/system/rust-claw.service`
+
+## Agent Usage (Discord)
+
+Important:
+- RustClaw replies only in **registered channels**.
+- If a channel is not registered, it is ignored even if you send mentions there.
+
+1. Make sure a main channel is registered.
+   - Recommended: set `AUTO_REGISTER_MAIN_JID=<discord_channel_id>@discord` in `.env`.
+   - Or register once manually:
+
+```bash
+cargo run -- bootstrap-main --jid <discord_channel_id>@discord
+```
+
+2. Register every additional Discord channel you want to use.
+
+```bash
+cargo run -- register-group \
+  --jid <discord_channel_id>@discord \
+  --name "General" \
+  --folder general \
+  --trigger @Andy \
+  --requires-trigger true
+```
+
+3. Verify registration:
+
+```bash
+cargo run -- list-groups
+```
+
+4. Start the app:
+
+```bash
+cargo run -- run
+```
+
+5. Send messages:
+   - Main channel (`folder=main`): normal messages are enough.
+   - Non-main channel (default): message must start with `@<ASSISTANT_NAME>`.
+   - Trigger check is a plain text prefix check (`@Andy ...`), so put it at the start.
+
+6. Trigger examples (when `ASSISTANT_NAME=Andy`):
+   - Works: `@Andy summarize this thread`
+   - Ignored: `please @Andy summarize this thread`
+
+7. If you want a non-main channel to work without a trigger, register it with `--requires-trigger false`.
+
+## CLI Admin Usage
+
+```bash
+# Show groups
+cargo run -- list-groups
+
+# Register another Discord channel as a group
+cargo run -- register-group \
+  --jid <discord_channel_id>@discord \
+  --name "Team Ops" \
+  --folder team-ops \
+  --trigger @Andy \
+  --requires-trigger true
+
+# Create a scheduled task (every day at 09:00)
+cargo run -- create-task \
+  --id daily-report \
+  --group-folder main \
+  --chat-jid <discord_channel_id>@discord \
+  --prompt "Write today's daily report." \
+  --schedule-type cron \
+  --schedule-value "0 9 * * *"
+
+# List/control tasks
+cargo run -- list-tasks
+cargo run -- pause-task --id daily-report
+cargo run -- resume-task --id daily-report
+cargo run -- cancel-task --id daily-report
+```
+
+## Notes
+
+- Default runtime mode is `AGENT_RUNNER_MODE=container`.
+- The main Rust process runs on host, and it spawns per-task agent containers via Docker.
+- Data/state are written under `data/`, `groups/`, and `store/`.
+- By default, no API keys are passed into agent containers.
+
+## License
+
+MIT

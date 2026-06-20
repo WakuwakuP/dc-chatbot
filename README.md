@@ -11,6 +11,7 @@ Owner Discord User は自分の ChatGPT Subscription Connection を接続し、R
 - `CONTEXT.md` — ドメイン用語と避けたい表現
 - `docs/adr/README.md` — ADR 索引
 - `docs/adr/*.md` — 個別の設計決定
+- `docs/development/setup-and-deploy-runbook.md` — 開発環境立ち上げ・本番デプロイ手順書
 - `AGENTS.md` — このリポジトリで作業する AI agent / developer 向けルール
 
 新しい実装判断が既存 ADR と矛盾する場合は、実装へ黙って合わせず、ADR の追加または更新を先に検討してください。

@@ -40,6 +40,10 @@ export const registeredMembers = sqliteTable(
   },
   (table) => [
     index("registered_members_owner_idx").on(table.assignedOwnerDiscordUserId),
+    index("registered_members_status_owner_idx").on(
+      table.status,
+      table.assignedOwnerDiscordUserId,
+    ),
   ],
 );
 
@@ -53,7 +57,10 @@ export const candidateDiscordUsers = sqliteTable(
     lastObservedAt: text("last_observed_at").notNull(),
     expiresAt: text("expires_at").notNull(),
   },
-  (table) => [index("candidate_expires_at_idx").on(table.expiresAt)],
+  (table) => [
+    index("candidate_expires_at_idx").on(table.expiresAt),
+    index("candidate_last_seen_idx").on(table.lastObservedAt),
+  ],
 );
 
 export const chatgptSubscriptionConnections = sqliteTable(
@@ -71,7 +78,13 @@ export const chatgptSubscriptionConnections = sqliteTable(
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
   },
-  (table) => [index("connections_owner_idx").on(table.ownerDiscordUserId)],
+  (table) => [
+    index("connections_owner_idx").on(table.ownerDiscordUserId),
+    index("connections_owner_status_idx").on(
+      table.ownerDiscordUserId,
+      table.status,
+    ),
+  ],
 );
 
 export const requestAuditMetadata = sqliteTable(
@@ -94,6 +107,7 @@ export const requestAuditMetadata = sqliteTable(
   (table) => [
     index("request_audit_request_id_idx").on(table.requestId),
     index("request_audit_retain_until_idx").on(table.retainUntil),
+    index("request_audit_created_at_idx").on(table.createdAt),
   ],
 );
 
@@ -112,7 +126,10 @@ export const providerCallAuditMetadata = sqliteTable(
     createdAt: text("created_at").notNull(),
     retainUntil: text("retain_until").notNull(),
   },
-  (table) => [index("provider_call_retain_until_idx").on(table.retainUntil)],
+  (table) => [
+    index("provider_call_retain_until_idx").on(table.retainUntil),
+    index("provider_call_request_idx").on(table.requestId),
+  ],
 );
 
 export const selectedContextMessageIds = sqliteTable(
@@ -121,8 +138,252 @@ export const selectedContextMessageIds = sqliteTable(
     selectedContextId: text("selected_context_id").primaryKey(),
     requestId: text("request_id").notNull(),
     discordMessageId: text("discord_message_id").notNull(),
+    contextSource: text("context_source", {
+      enum: [
+        "selector",
+        "forced_trigger",
+        "rule_fallback",
+        "reply_chain",
+        "thread_starter",
+        "thread_recent",
+        "dm_recent",
+        "automated_trigger",
+      ],
+    }),
+    authorRelation: text("author_relation", {
+      enum: [
+        "trigger_user",
+        "bot_self",
+        "other_allowed",
+        "non_allowed",
+        "automated_source",
+      ],
+    }),
     createdAt: text("created_at").notNull(),
     retainUntil: text("retain_until").notNull(),
   },
-  (table) => [index("selected_context_retain_until_idx").on(table.retainUntil)],
+  (table) => [
+    index("selected_context_retain_until_idx").on(table.retainUntil),
+    index("selected_context_request_idx").on(table.requestId),
+  ],
+);
+
+export const ownerNotifications = sqliteTable(
+  "owner_notifications",
+  {
+    ownerNotificationId: text("owner_notification_id").primaryKey(),
+    notificationOwnerDiscordUserId: text(
+      "notification_owner_discord_user_id",
+    ).notNull(),
+    candidateDiscordUserId: text("candidate_discord_user_id"),
+    requestId: text("request_id"),
+    triggerKind: text("trigger_kind", {
+      enum: ["dm", "guild_mention", "automated_trigger_source"],
+    }),
+    status: text("status", {
+      enum: [
+        "pending_delivery",
+        "delivery_requested",
+        "delivered",
+        "failed",
+        "suppressed",
+      ],
+    }).notNull(),
+    safeErrorCategory: text("safe_error_category"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    retainUntil: text("retain_until").notNull(),
+  },
+  (table) => [
+    index("owner_notifications_owner_status_idx").on(
+      table.notificationOwnerDiscordUserId,
+      table.status,
+    ),
+    index("owner_notifications_retain_until_idx").on(table.retainUntil),
+  ],
+);
+
+export const botSettings = sqliteTable("bot_settings", {
+  settingsId: text("settings_id").primaryKey(),
+  notificationOwnerDiscordUserId: text("notification_owner_discord_user_id"),
+  automatedTriggerDefaultCooldownSeconds: integer(
+    "automated_trigger_default_cooldown_seconds",
+  ).notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const modelSettings = sqliteTable("model_settings", {
+  settingsId: text("settings_id").primaryKey(),
+  contextSelectionModel: text("context_selection_model").notNull(),
+  responseDecisionModel: text("response_decision_model").notNull(),
+  responseGenerationModel: text("response_generation_model").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const promptSettings = sqliteTable(
+  "prompt_settings",
+  {
+    promptSettingId: text("prompt_setting_id").primaryKey(),
+    promptKey: text("prompt_key").notNull(),
+    activeVersionId: text("active_version_id"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [uniqueIndex("prompt_settings_key_uidx").on(table.promptKey)],
+);
+
+export const promptSettingVersions = sqliteTable(
+  "prompt_setting_versions",
+  {
+    promptSettingVersionId: text("prompt_setting_version_id").primaryKey(),
+    promptSettingId: text("prompt_setting_id").notNull(),
+    label: text("label"),
+    promptBodySha256: text("prompt_body_sha256").notNull(),
+    promptBodyLength: integer("prompt_body_length").notNull(),
+    createdByOwnerDiscordUserId: text(
+      "created_by_owner_discord_user_id",
+    ).notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    index("prompt_versions_setting_created_idx").on(
+      table.promptSettingId,
+      table.createdAt,
+    ),
+  ],
+);
+
+export const settingAuditMetadata = sqliteTable(
+  "setting_audit_metadata",
+  {
+    settingAuditId: text("setting_audit_id").primaryKey(),
+    actorOwnerDiscordUserId: text("actor_owner_discord_user_id").notNull(),
+    settingCategory: text("setting_category").notNull(),
+    eventType: text("event_type").notNull(),
+    beforeRef: text("before_ref"),
+    afterRef: text("after_ref"),
+    createdAt: text("created_at").notNull(),
+    retainUntil: text("retain_until").notNull(),
+  },
+  (table) => [
+    index("setting_audit_retain_until_idx").on(table.retainUntil),
+    index("setting_audit_created_at_idx").on(table.createdAt),
+  ],
+);
+
+export const automatedTriggerSources = sqliteTable(
+  "automated_trigger_sources",
+  {
+    automatedTriggerSourceId: text("automated_trigger_source_id").primaryKey(),
+    sourceDiscordUserId: text("source_discord_user_id"),
+    sourceApplicationId: text("source_application_id"),
+    assignedOwnerDiscordUserId: text(
+      "assigned_owner_discord_user_id",
+    ).notNull(),
+    status: text("status", { enum: ["active", "disabled"] }).notNull(),
+    replyMode: text("reply_mode", {
+      enum: ["reply", "channel_message", "none"],
+    }).notNull(),
+    cooldownSeconds: integer("cooldown_seconds").notNull(),
+    lastTriggeredAt: text("last_triggered_at"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    index("automated_sources_owner_status_idx").on(
+      table.assignedOwnerDiscordUserId,
+      table.status,
+    ),
+    index("automated_sources_discord_user_idx").on(table.sourceDiscordUserId),
+    index("automated_sources_application_idx").on(table.sourceApplicationId),
+  ],
+);
+
+export const discordResponseMessages = sqliteTable(
+  "discord_response_messages",
+  {
+    responseMessageId: text("response_message_id").primaryKey(),
+    requestId: text("request_id").notNull(),
+    discordMessageId: text("discord_message_id").notNull(),
+    guildId: text("guild_id"),
+    channelId: text("channel_id").notNull(),
+    chunkIndex: integer("chunk_index").notNull(),
+    chunkCount: integer("chunk_count").notNull(),
+    status: text("status", { enum: ["posted", "failed"] }).notNull(),
+    createdAt: text("created_at").notNull(),
+    retainUntil: text("retain_until").notNull(),
+  },
+  (table) => [
+    index("discord_response_request_idx").on(table.requestId),
+    index("discord_response_retain_until_idx").on(table.retainUntil),
+  ],
+);
+
+export const connectionFlowStates = sqliteTable(
+  "connection_flow_states",
+  {
+    connectionFlowStateId: text("connection_flow_state_id").primaryKey(),
+    ownerDiscordUserId: text("owner_discord_user_id").notNull(),
+    providerKind: text("provider_kind", { enum: ["fake"] }).notNull(),
+    stateHash: text("state_hash").notNull(),
+    status: text("status", {
+      enum: ["pending", "completed", "expired", "failed"],
+    }).notNull(),
+    requestedAt: text("requested_at").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    completedAt: text("completed_at"),
+    retainUntil: text("retain_until").notNull(),
+  },
+  (table) => [
+    index("connection_flow_owner_status_idx").on(
+      table.ownerDiscordUserId,
+      table.status,
+    ),
+    index("connection_flow_expires_at_idx").on(table.expiresAt),
+    index("connection_flow_retain_until_idx").on(table.retainUntil),
+  ],
+);
+
+export const cleanupRunMetadata = sqliteTable(
+  "cleanup_run_metadata",
+  {
+    cleanupRunId: text("cleanup_run_id").primaryKey(),
+    status: text("status", {
+      enum: ["started", "completed", "failed"],
+    }).notNull(),
+    startedAt: text("started_at").notNull(),
+    finishedAt: text("finished_at"),
+    deletedRowCount: integer("deleted_row_count").notNull(),
+    safeErrorCategory: text("safe_error_category"),
+    retainUntil: text("retain_until").notNull(),
+  },
+  (table) => [
+    index("cleanup_run_retain_until_idx").on(table.retainUntil),
+    index("cleanup_run_started_at_idx").on(table.startedAt),
+  ],
+);
+
+export const generationLocks = sqliteTable(
+  "generation_locks",
+  {
+    connectionId: text("connection_id").primaryKey(),
+    lockId: text("lock_id").notNull(),
+    requestId: text("request_id").notNull(),
+    lockedUntil: text("locked_until").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [index("generation_locks_locked_until_idx").on(table.lockedUntil)],
+);
+
+export const refreshLocks = sqliteTable(
+  "refresh_locks",
+  {
+    connectionId: text("connection_id").primaryKey(),
+    lockId: text("lock_id").notNull(),
+    lockedUntil: text("locked_until").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [index("refresh_locks_locked_until_idx").on(table.lockedUntil)],
 );

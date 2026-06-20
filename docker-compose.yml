@@ -1,12 +1,16 @@
 services:
   api:
     image: node:22-bookworm-slim
+    init: true
     working_dir: /workspace
     command: sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm --filter @dc-chatbot/api dev"
     environment:
       ALLOW_LOCAL_AUTH_BYPASS: "true"
+      DC_CHATBOT_ENV: development
+      LOCAL_AUTH_BYPASS_SECRET: ${LOCAL_AUTH_BYPASS_SECRET:-local-auth-bypass-secret}
       CF_ACCESS_CLIENT_ID: ${CF_ACCESS_CLIENT_ID:-local-dev-client-id}
       CF_ACCESS_CLIENT_SECRET: ${CF_ACCESS_CLIENT_SECRET:-local-dev-client-secret}
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
       DEFAULT_FAKE_CONNECTION_ID: ${DEFAULT_FAKE_CONNECTION_ID:-01HY0000000000000000000002}
       PORT: "8787"
     ports:
@@ -14,12 +18,24 @@ services:
     volumes:
       - .:/workspace
       - pnpm-store:/root/.local/share/pnpm/store
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "fetch(''http://127.0.0.1:8787/health'').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
 
   web:
     image: node:22-bookworm-slim
+    init: true
     working_dir: /workspace
     command: sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm --filter @dc-chatbot/web dev"
     environment:
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
       VITE_API_BASE_URL: http://localhost:8787
     ports:
       - "5173:5173"
@@ -27,28 +43,44 @@ services:
       - .:/workspace
       - pnpm-store:/root/.local/share/pnpm/store
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "fetch(''http://127.0.0.1:5173'').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
 
   bot:
     image: node:22-bookworm-slim
     profiles:
       - bot
+    init: true
     working_dir: /workspace
     command: sh -c "corepack enable && pnpm install --frozen-lockfile && pnpm --filter @dc-chatbot/bot dev"
     environment:
-      DC_CHATBOT_ENV: development
-      DC_CHATBOT_ALLOW_DEV_BOT: "true"
-      DC_CHATBOT_API_BASE_URL: http://api:8787
       CF_ACCESS_CLIENT_ID: ${CF_ACCESS_CLIENT_ID:-local-dev-client-id}
       CF_ACCESS_CLIENT_SECRET: ${CF_ACCESS_CLIENT_SECRET:-local-dev-client-secret}
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+      DC_CHATBOT_ALLOW_DEV_BOT: "true"
+      DC_CHATBOT_ALLOW_PRODUCTION_BOT_TOKEN: "false"
+      DC_CHATBOT_API_BASE_URL: http://api:8787
+      DC_CHATBOT_ENV: development
       DISCORD_DEV_GUILD_ID: ${DISCORD_DEV_GUILD_ID:-}
       DISCORD_DEV_TOKEN: ${DISCORD_DEV_TOKEN:-}
-      DISCORD_TOKEN: ${DISCORD_TOKEN:-}
+      # Never forward a production Bot token from the host into local Compose.
+      DISCORD_TOKEN: ""
     volumes:
       - .:/workspace
       - pnpm-store:/root/.local/share/pnpm/store
     depends_on:
-      - api
+      api:
+        condition: service_healthy
 
 volumes:
   pnpm-store:

@@ -4,7 +4,13 @@ import worker, { type Env } from "./worker";
 const port = Number.parseInt(process.env.PORT ?? "8787", 10);
 
 const env: Env = {
+  DC_CHATBOT_ENV: process.env.DC_CHATBOT_ENV ?? "development",
   ALLOW_LOCAL_AUTH_BYPASS: process.env.ALLOW_LOCAL_AUTH_BYPASS ?? "true",
+  LOCAL_AUTH_BYPASS_SECRET:
+    process.env.LOCAL_AUTH_BYPASS_SECRET ?? "local-auth-bypass-secret",
+  CHATGPT_CREDENTIAL_MASTER_KEY_CURRENT:
+    process.env.CHATGPT_CREDENTIAL_MASTER_KEY_CURRENT ??
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
 };
 
 if (process.env.CF_ACCESS_CLIENT_ID) {
@@ -15,6 +21,12 @@ if (process.env.CF_ACCESS_CLIENT_SECRET) {
 }
 if (process.env.DEFAULT_FAKE_CONNECTION_ID) {
   env.DEFAULT_FAKE_CONNECTION_ID = process.env.DEFAULT_FAKE_CONNECTION_ID;
+}
+if (process.env.CF_ACCESS_TEAM_DOMAIN) {
+  env.CF_ACCESS_TEAM_DOMAIN = process.env.CF_ACCESS_TEAM_DOMAIN;
+}
+if (process.env.CF_ACCESS_AUD) {
+  env.CF_ACCESS_AUD = process.env.CF_ACCESS_AUD;
 }
 
 function collectRequestBody(

@@ -20,7 +20,8 @@ Until the target is selected:
 - Do not add platform-specific Bot infrastructure files.
 - Keep production Bot token usage behind explicit production configuration.
 - Keep Bot access to the Cloudflare Workers API through Cloudflare Access Service Token headers.
-- Ensure GitHub Actions deploy skeleton performs preflight checks and prints guidance before any deploy attempt when required secrets or target variables are not configured.
+- Ensure GitHub Actions deploy preflight checks API/Web/D1 requirements before deployment.
+- Keep the Bot deploy job as an explicit placeholder. If `BOT_DEPLOY_TARGET` is configured before a target-specific job exists, the workflow must fail instead of pretending to deploy the Bot Worker.
 
 ## Required follow-up before Bot deployment
 
@@ -32,6 +33,7 @@ Select and document:
 - log redaction/metadata-only guarantees
 - deployment rollback/forward-fix policy
 - environment variable names and GitHub Actions environment mapping
+- replacement of `.github/workflows/deploy.yml` Bot placeholder with target-specific build, secret injection, deploy, and smoke-check steps
 
 ## Privacy/security note
 

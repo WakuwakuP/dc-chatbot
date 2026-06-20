@@ -1,0 +1,23 @@
+name = "dc-chatbot-api"
+main = "src/worker.ts"
+compatibility_date = "2026-06-20"
+workers_dev = false
+preview_urls = false
+
+# Production must keep local auth bypass disabled. Local development uses
+# apps/api/src/local-dev.ts through docker-compose.yml instead of this config.
+[vars]
+ALLOW_LOCAL_AUTH_BYPASS = "false"
+# Required in production for /api/v1/owner/* Cloudflare Access JWT verification.
+# Set these from GitHub Actions variables during deployment.
+CF_ACCESS_TEAM_DOMAIN = "replace-with-team.cloudflareaccess.com"
+CF_ACCESS_AUD = "replace-with-access-application-aud"
+
+[triggers]
+crons = ["17 19 * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "dc-chatbot-production"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "../../packages/data/migrations"

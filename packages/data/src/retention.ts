@@ -3,18 +3,31 @@ export type RetentionCleanupPlan = {
   sql: string;
 };
 
-const RETENTION_TABLES = [
-  "candidate_discord_users",
-  "request_audit_metadata",
-  "provider_call_audit_metadata",
-  "selected_context_message_ids",
+type RetentionTable = {
+  tableName: string;
+  columnName: "retain_until" | "expires_at" | "locked_until";
+};
+
+const RETENTION_TABLES: readonly RetentionTable[] = [
+  { tableName: "candidate_discord_users", columnName: "expires_at" },
+  { tableName: "request_audit_metadata", columnName: "retain_until" },
+  { tableName: "provider_call_audit_metadata", columnName: "retain_until" },
+  { tableName: "selected_context_message_ids", columnName: "retain_until" },
+  { tableName: "owner_notifications", columnName: "retain_until" },
+  { tableName: "setting_audit_metadata", columnName: "retain_until" },
+  { tableName: "discord_response_messages", columnName: "retain_until" },
+  { tableName: "connection_flow_states", columnName: "retain_until" },
+  { tableName: "cleanup_run_metadata", columnName: "retain_until" },
+  { tableName: "generation_locks", columnName: "locked_until" },
+  { tableName: "refresh_locks", columnName: "locked_until" },
 ] as const;
 
 export function buildRetentionCleanupPlan(
   nowIsoUtc: string,
 ): RetentionCleanupPlan[] {
-  return RETENTION_TABLES.map((tableName) => ({
+  const escapedNow = nowIsoUtc.replaceAll("'", "''");
+  return RETENTION_TABLES.map(({ tableName, columnName }) => ({
     tableName,
-    sql: `DELETE FROM ${tableName} WHERE retain_until < '${nowIsoUtc.replaceAll("'", "''")}'`,
+    sql: `DELETE FROM ${tableName} WHERE ${columnName} < '${escapedNow}'`,
   }));
 }

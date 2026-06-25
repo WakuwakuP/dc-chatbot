@@ -163,9 +163,7 @@ function buildIntakeRequest(
   return request;
 }
 
-function buildAttachmentMetadata(
-  message: Message,
-): AttachmentMetadataInput[] {
+function buildAttachmentMetadata(message: Message): AttachmentMetadataInput[] {
   return [...message.attachments.values()]
     .filter(
       (attachment) => attachment.size <= MAX_ATTACHMENT_METADATA_SIZE_BYTES,
@@ -196,7 +194,10 @@ function classifyAttachmentKind(attachment: Attachment): AttachmentKind {
   if (contentType.startsWith("image/")) {
     return "image";
   }
-  if (contentType.startsWith("text/") || isTextAttachmentName(attachment.name)) {
+  if (
+    contentType.startsWith("text/") ||
+    isTextAttachmentName(attachment.name)
+  ) {
     return "text";
   }
   return "other";

@@ -26,8 +26,7 @@ const DEFAULT_FETCH_LIMIT = 10;
 export function buildOwnerNotificationDmText(
   notification: OwnerNotificationItem,
 ): string {
-  const candidateDiscordUserId =
-    notification.candidateDiscordUserId ?? "不明";
+  const candidateDiscordUserId = notification.candidateDiscordUserId ?? "不明";
   const triggerKind = notification.triggerKind ?? "不明";
   const requestId = notification.requestId ?? "不明";
 
@@ -84,11 +83,14 @@ export async function deliverPendingOwnerNotifications(
           safeErrorCategory,
         });
       } catch {
-        options.logger?.info("dc-chatbot owner notification status update failed", {
-          eventType: "owner_notification_status_update_failed",
-          ownerNotificationId: notification.ownerNotificationId,
-          safeErrorCategory: "bot_api_status_update_failed",
-        });
+        options.logger?.info(
+          "dc-chatbot owner notification status update failed",
+          {
+            eventType: "owner_notification_status_update_failed",
+            ownerNotificationId: notification.ownerNotificationId,
+            safeErrorCategory: "bot_api_status_update_failed",
+          },
+        );
       }
     }
   }

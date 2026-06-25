@@ -509,7 +509,9 @@ function bucketLabel(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
-function createEmptyUsageSummary(nowIsoUtc: string): OwnerDashboardUsageSummary {
+function createEmptyUsageSummary(
+  nowIsoUtc: string,
+): OwnerDashboardUsageSummary {
   const periodEnd = new Date(nowIsoUtc);
   const firstBucketStart = addUtcDays(startOfUtcDay(periodEnd), -6);
   const buckets: OwnerDashboardUsageBucket[] = Array.from(

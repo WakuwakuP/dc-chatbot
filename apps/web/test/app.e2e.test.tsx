@@ -219,9 +219,7 @@ describe("Owner API client", () => {
       { status: "disabled", replyMode: "none", cooldownSeconds: 60 },
     );
 
-    expect(calls[0]?.url).toContain(
-      "/api/v1/owner/automated-trigger-sources",
-    );
+    expect(calls[0]?.url).toContain("/api/v1/owner/automated-trigger-sources");
     expect(calls[0]?.init?.method).toBe("POST");
     expect(calls[1]?.url).toContain(
       "/api/v1/owner/automated-trigger-sources/01J00000000000000000000000",

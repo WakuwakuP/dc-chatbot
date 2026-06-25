@@ -26,9 +26,8 @@ function createApiClient(): BotApiClient {
     fetchPendingOwnerNotifications: vi
       .fn<BotApiClient["fetchPendingOwnerNotifications"]>()
       .mockResolvedValue({ ownerNotifications: [OWNER_NOTIFICATION] }),
-    updateOwnerNotificationDelivery: vi.fn<
-      BotApiClient["updateOwnerNotificationDelivery"]
-    >(),
+    updateOwnerNotificationDelivery:
+      vi.fn<BotApiClient["updateOwnerNotificationDelivery"]>(),
   };
 }
 

@@ -5,9 +5,7 @@ import {
   type AutomatedTriggerSourceRecord,
   type OwnerRecord,
 } from "@dc-chatbot/data";
-import {
-  canManageOwnerSettings,
-} from "@dc-chatbot/domain";
+import { canManageOwnerSettings } from "@dc-chatbot/domain";
 import {
   ProviderError,
   createLLMProvider,
@@ -135,9 +133,7 @@ function activeProviderIdentity(env: Env): ActiveProviderIdentity {
     : { providerKind: "fake", providerRef: "local" };
 }
 
-function configuredProviderAccessStatus(
-  env: Env,
-): {
+function configuredProviderAccessStatus(env: Env): {
   status: ConfiguredProviderAccessStatus;
   safeErrorCategory: SafeProviderErrorCategory | null;
 } {
@@ -152,9 +148,7 @@ function configuredProviderAccessStatus(
   return { status: "available", safeErrorCategory: null };
 }
 
-function safeProviderErrorCategory(
-  error: unknown,
-): SafeProviderErrorCategory {
+function safeProviderErrorCategory(error: unknown): SafeProviderErrorCategory {
   return error instanceof ProviderError ? error.safeCategory : "unknown";
 }
 
@@ -1048,27 +1042,20 @@ async function handleBotRespond(request: Request, env: Env): Promise<Response> {
           selectedContextMessageIds: contextSelection.selectedContextMessageIds,
         });
   if (repository && respondRequest.triggerKind !== "automated_trigger_source") {
-    const providerConfig = await repository.getProviderConfigMetadata(nowIsoUtc);
-    await recordDeterministicProviderStageAudit(
-      repository,
-      providerIdentity,
-      {
-        requestId: respondRequest.requestId,
-        providerCallStage: "context_selection",
-        model: providerConfig.modelSettings.contextSelectionModel,
-        nowIsoUtc,
-      },
-    );
-    await recordDeterministicProviderStageAudit(
-      repository,
-      providerIdentity,
-      {
-        requestId: respondRequest.requestId,
-        providerCallStage: "response_decision",
-        model: providerConfig.modelSettings.responseDecisionModel,
-        nowIsoUtc,
-      },
-    );
+    const providerConfig =
+      await repository.getProviderConfigMetadata(nowIsoUtc);
+    await recordDeterministicProviderStageAudit(repository, providerIdentity, {
+      requestId: respondRequest.requestId,
+      providerCallStage: "context_selection",
+      model: providerConfig.modelSettings.contextSelectionModel,
+      nowIsoUtc,
+    });
+    await recordDeterministicProviderStageAudit(repository, providerIdentity, {
+      requestId: respondRequest.requestId,
+      providerCallStage: "response_decision",
+      model: providerConfig.modelSettings.responseDecisionModel,
+      nowIsoUtc,
+    });
     if (!finalDecision.shouldRespond) {
       const finishedAt = new Date().toISOString();
       await Promise.all([

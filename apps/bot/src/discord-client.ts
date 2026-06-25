@@ -98,9 +98,7 @@ function startOwnerNotificationDeliveryPolling(
     }
     isPolling = true;
     try {
-      const deliveryOptions = options.logger
-        ? { logger: options.logger }
-        : {};
+      const deliveryOptions = options.logger ? { logger: options.logger } : {};
       const summary: OwnerNotificationDeliverySummary = await deliver(
         client,
         apiClient,
@@ -113,10 +111,13 @@ function startOwnerNotificationDeliveryPolling(
         failedCount: summary.failedCount,
       });
     } catch {
-      options.logger?.info("dc-chatbot owner notification delivery poll failed", {
-        eventType: "owner_notification_delivery_poll_failed",
-        safeErrorCategory: "owner_notification_poll_failed",
-      });
+      options.logger?.info(
+        "dc-chatbot owner notification delivery poll failed",
+        {
+          eventType: "owner_notification_delivery_poll_failed",
+          safeErrorCategory: "owner_notification_poll_failed",
+        },
+      );
     } finally {
       isPolling = false;
     }
@@ -134,7 +135,10 @@ function startOwnerNotificationDeliveryPolling(
   };
 }
 
-function installClientDestroyCleanup(client: Client, cleanup: () => void): void {
+function installClientDestroyCleanup(
+  client: Client,
+  cleanup: () => void,
+): void {
   const originalDestroy = client.destroy.bind(client);
   let isCleanedUp = false;
   client.destroy = (() => {

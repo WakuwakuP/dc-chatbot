@@ -110,25 +110,23 @@ describe("createBotApiClient", () => {
   });
 
   it("fetches pending Owner Notifications for delivery", async () => {
-    const fetchMock = vi
-      .fn<typeof globalThis.fetch>()
-      .mockResolvedValue(
-        createResponse({
-          ownerNotifications: [
-            {
-              ownerNotificationId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
-              notificationOwnerDiscordUserId: "123",
-              candidateDiscordUserId: "456",
-              requestId: "01ARZ3NDEKTSV4RRFFQ69G5FAW",
-              triggerKind: "dm",
-              status: "delivery_requested",
-              safeErrorCategory: null,
-              createdAt: "2026-06-20T00:00:00.000Z",
-              updatedAt: "2026-06-20T00:00:01.000Z",
-            },
-          ],
-        }),
-      );
+    const fetchMock = vi.fn<typeof globalThis.fetch>().mockResolvedValue(
+      createResponse({
+        ownerNotifications: [
+          {
+            ownerNotificationId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            notificationOwnerDiscordUserId: "123",
+            candidateDiscordUserId: "456",
+            requestId: "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+            triggerKind: "dm",
+            status: "delivery_requested",
+            safeErrorCategory: null,
+            createdAt: "2026-06-20T00:00:00.000Z",
+            updatedAt: "2026-06-20T00:00:01.000Z",
+          },
+        ],
+      }),
+    );
 
     const client = createClient(fetchMock);
     await expect(client.fetchPendingOwnerNotifications(5)).resolves.toEqual({

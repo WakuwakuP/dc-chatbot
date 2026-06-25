@@ -22,12 +22,10 @@ function createApiClient(events: string[] = []): BotApiClient {
     }),
     intakeMessage: vi.fn<BotApiClient["intakeMessage"]>(),
     requestResponse: vi.fn<BotApiClient["requestResponse"]>(),
-    fetchPendingOwnerNotifications: vi.fn<
-      BotApiClient["fetchPendingOwnerNotifications"]
-    >(),
-    updateOwnerNotificationDelivery: vi.fn<
-      BotApiClient["updateOwnerNotificationDelivery"]
-    >(),
+    fetchPendingOwnerNotifications:
+      vi.fn<BotApiClient["fetchPendingOwnerNotifications"]>(),
+    updateOwnerNotificationDelivery:
+      vi.fn<BotApiClient["updateOwnerNotificationDelivery"]>(),
   };
 }
 

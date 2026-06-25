@@ -79,8 +79,7 @@ export function SettingsRoute() {
   const { canManageOwnerSettings, ownerStatus } = useOwnerLayout();
   const [settings, setSettings] = useState<OwnerSettings | null>(null);
   const [botForm, setBotForm] = useState<BotSettingsForm>(emptyBotForm);
-  const [modelForm, setModelForm] =
-    useState<ModelSettingsForm>(emptyModelForm);
+  const [modelForm, setModelForm] = useState<ModelSettingsForm>(emptyModelForm);
   const [promptForm, setPromptForm] =
     useState<PromptMetadataForm>(emptyPromptForm);
   const [isLoading, setIsLoading] = useState(true);

@@ -34,12 +34,10 @@ function createApiClient(): BotApiClient {
       .fn<BotApiClient["intakeMessage"]>()
       .mockResolvedValue(IGNORE_RESPONSE),
     requestResponse: vi.fn<BotApiClient["requestResponse"]>(),
-    fetchPendingOwnerNotifications: vi.fn<
-      BotApiClient["fetchPendingOwnerNotifications"]
-    >(),
-    updateOwnerNotificationDelivery: vi.fn<
-      BotApiClient["updateOwnerNotificationDelivery"]
-    >(),
+    fetchPendingOwnerNotifications:
+      vi.fn<BotApiClient["fetchPendingOwnerNotifications"]>(),
+    updateOwnerNotificationDelivery:
+      vi.fn<BotApiClient["updateOwnerNotificationDelivery"]>(),
   };
 }
 

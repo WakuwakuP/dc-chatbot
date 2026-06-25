@@ -184,7 +184,7 @@ export function AutomatedTriggerSourcesRoute() {
     Boolean(createForm.assignedOwnerDiscordUserId.trim()) &&
     Boolean(
       createForm.sourceDiscordUserId.trim() ||
-        createForm.sourceApplicationId.trim(),
+      createForm.sourceApplicationId.trim(),
     );
 
   return (
@@ -461,9 +461,7 @@ export function AutomatedTriggerSourcesRoute() {
                       <td className="py-2 pr-3">
                         {replyModeLabel(source.replyMode)}
                       </td>
-                      <td className="py-2 pr-3">
-                        {source.cooldownSeconds}s
-                      </td>
+                      <td className="py-2 pr-3">{source.cooldownSeconds}s</td>
                       <td className="py-2 pr-3">
                         {source.assignedOwnerDiscordUserId}
                       </td>

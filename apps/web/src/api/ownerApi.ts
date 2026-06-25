@@ -273,8 +273,7 @@ function mapDashboardSummary(raw: unknown): DashboardSummary {
   const usage = isRecord(record.usage) ? record.usage : {};
   const usagePeriodEnd =
     readString(usage, "periodEnd") ?? new Date(0).toISOString();
-  const usagePeriodStart =
-    readString(usage, "periodStart") ?? usagePeriodEnd;
+  const usagePeriodStart = readString(usage, "periodStart") ?? usagePeriodEnd;
 
   return {
     owner: mapOwnerMe(record.owner),
@@ -381,15 +380,14 @@ function mapModelSettings(raw: unknown): ModelSettings {
   };
 }
 
-function mapPromptSetting(raw: Record<string, unknown>): PromptSettingsMetadata {
+function mapPromptSetting(
+  raw: Record<string, unknown>,
+): PromptSettingsMetadata {
   return {
     promptSettingId: readString(raw, "promptSettingId") ?? "",
     promptKey: readString(raw, "promptKey") ?? "",
     activeVersionId: readNullableString(raw, "activeVersionId"),
-    activePromptBodySha256: readNullableString(
-      raw,
-      "activePromptBodySha256",
-    ),
+    activePromptBodySha256: readNullableString(raw, "activePromptBodySha256"),
     activePromptBodyLength: readNumber(raw, "activePromptBodyLength"),
     updatedAt: readString(raw, "updatedAt") ?? "",
   };

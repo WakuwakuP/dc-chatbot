@@ -90,8 +90,8 @@ export function HomeRoute() {
 
       {isUnavailable ? (
         <UnavailableNotice>
-          Dashboard summary を取得できないため、/owner/me
-          から取得できる Owner scope だけ表示しています。
+          Dashboard summary を取得できないため、/owner/me から取得できる Owner
+          scope だけ表示しています。
         </UnavailableNotice>
       ) : null}
       {error ? <ProblemNotice error={error} /> : null}
@@ -153,7 +153,12 @@ export function HomeRoute() {
             <CardContent className="space-y-4">
               <div className="flex flex-wrap items-center gap-2">
                 <StatusPill>{summary.usage.periodLabel}</StatusPill>
-                <span>{formatPeriod(summary.usage.periodStart, summary.usage.periodEnd)}</span>
+                <span>
+                  {formatPeriod(
+                    summary.usage.periodStart,
+                    summary.usage.periodEnd,
+                  )}
+                </span>
               </div>
               <div className="grid gap-3 sm:grid-cols-3">
                 <div>

@@ -582,19 +582,22 @@ describe("API Worker routes", () => {
   });
 
   it("claims metadata-only pending Owner Notifications for bot delivery", async () => {
-    const db = new FakeD1Database([], [
-      {
-        owner_notification_id: "01HY0000000000000000000000",
-        notification_owner_discord_user_id: "999",
-        candidate_discord_user_id: "300",
-        request_id: "01HY0000000000000000000001",
-        trigger_kind: "dm",
-        status: "pending_delivery",
-        safe_error_category: null,
-        created_at: "2026-06-20T00:00:00.000Z",
-        updated_at: "2026-06-20T00:00:00.000Z",
-      },
-    ]);
+    const db = new FakeD1Database(
+      [],
+      [
+        {
+          owner_notification_id: "01HY0000000000000000000000",
+          notification_owner_discord_user_id: "999",
+          candidate_discord_user_id: "300",
+          request_id: "01HY0000000000000000000001",
+          trigger_kind: "dm",
+          status: "pending_delivery",
+          safe_error_category: null,
+          created_at: "2026-06-20T00:00:00.000Z",
+          updated_at: "2026-06-20T00:00:00.000Z",
+        },
+      ],
+    );
 
     const response = await worker.fetch(
       new Request(
@@ -1100,7 +1103,8 @@ describe("API Worker routes", () => {
       expect.any(String),
     ]);
     expect(
-      dbCallsContaining(db, "INSERT INTO provider_call_audit_metadata").at(-1)
+      dbCallsContaining(db, "INSERT INTO provider_call_audit_metadata")
+        .at(-1)
         ?.bindings.slice(1, 8),
     ).toEqual([
       "01HY0000000000000000000000",
@@ -1163,7 +1167,8 @@ describe("API Worker routes", () => {
       expect.any(String),
     ]);
     expect(
-      dbCallsContaining(db, "INSERT INTO provider_call_audit_metadata").at(-1)
+      dbCallsContaining(db, "INSERT INTO provider_call_audit_metadata")
+        .at(-1)
         ?.bindings.slice(1, 8),
     ).toEqual([
       "01HY0000000000000000000000",

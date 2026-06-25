@@ -417,7 +417,9 @@ export type BotOwnerNotificationDeliveryListResponse = v.InferOutput<
 export const BotOwnerNotificationDeliveryUpdateRequestSchema = v.object({
   ownerNotificationId: UlidSchema,
   status: v.picklist(["delivery_requested", "delivered", "failed"]),
-  safeErrorCategory: v.optional(OwnerNotificationDeliverySafeErrorCategorySchema),
+  safeErrorCategory: v.optional(
+    OwnerNotificationDeliverySafeErrorCategorySchema,
+  ),
   deliveredAt: v.optional(IsoDateTimeSchema),
 });
 export type BotOwnerNotificationDeliveryUpdateRequest = v.InferOutput<

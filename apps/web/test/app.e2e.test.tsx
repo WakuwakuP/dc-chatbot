@@ -83,6 +83,43 @@ describe("Owner API client", () => {
           candidateDiscordUserCount: 3,
           pendingOwnerNotificationCount: 4,
           automatedTriggerSourceCounts: { active: 5, disabled: 6 },
+          usage: {
+            periodStart: "2026-06-14T00:00:00.000Z",
+            periodEnd: "2026-06-20T12:00:00.000Z",
+            periodLabel: "Last 7 days",
+            requestCount: 7,
+            providerCallCount: 8,
+            errorCount: 2,
+            buckets: [
+              {
+                label: "2026-06-20",
+                periodStart: "2026-06-20T00:00:00.000Z",
+                periodEnd: "2026-06-21T00:00:00.000Z",
+                requestCount: 1,
+                providerCallCount: 2,
+                errorCount: 1,
+                extra: "discarded-extra-field",
+              },
+            ],
+          },
+          recentErrors: [
+            {
+              id: "01J00000000000000000000000",
+              occurredAt: "2026-06-20T01:00:00.000Z",
+              surface: "provider",
+              category: "temporary_unavailable",
+              requestId: "01J00000000000000000000001",
+              extra: "discarded-extra-field",
+            },
+          ],
+          settingsWarnings: [
+            {
+              code: "configured_provider_access_unavailable",
+              title: "Configured Provider Access is unavailable",
+              severity: "warning",
+              extra: "discarded-extra-field",
+            },
+          ],
           extra: "discarded-extra-field",
         }),
         {
@@ -98,6 +135,10 @@ describe("Owner API client", () => {
     expect(summary.registeredMemberCounts.active).toBe(2);
     expect(summary.candidateDiscordUserCount).toBe(3);
     expect(summary.automatedTriggerSourceCounts.disabled).toBe(6);
+    expect(summary.usage.providerCallCount).toBe(8);
+    expect(summary.usage.buckets[0]?.errorCount).toBe(1);
+    expect(summary.recentErrors[0]?.category).toBe("temporary_unavailable");
+    expect(summary.settingsWarnings[0]?.severity).toBe("warning");
     expect(JSON.stringify(summary)).not.toContain("discarded-extra-field");
   });
 

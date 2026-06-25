@@ -1130,7 +1130,10 @@ async function handleOwnerDashboard(
   if (auth instanceof Response) {
     return auth;
   }
-  const summary = await auth.repository.getDashboardSummary(auth.record);
+  const summary = await auth.repository.getDashboardSummary(
+    auth.record,
+    new Date().toISOString(),
+  );
   const body: OwnerDashboardSummaryResponse = {
     owner: auth.owner,
     ...summary,

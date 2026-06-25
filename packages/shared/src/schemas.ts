@@ -99,6 +99,40 @@ export const OwnerDashboardSummaryResponseSchema = v.object({
     active: v.pipe(v.number(), v.integer(), v.minValue(0)),
     disabled: v.pipe(v.number(), v.integer(), v.minValue(0)),
   }),
+  usage: v.object({
+    periodStart: IsoDateTimeSchema,
+    periodEnd: IsoDateTimeSchema,
+    periodLabel: NonEmptySafeStringSchema,
+    requestCount: v.pipe(v.number(), v.integer(), v.minValue(0)),
+    providerCallCount: v.pipe(v.number(), v.integer(), v.minValue(0)),
+    errorCount: v.pipe(v.number(), v.integer(), v.minValue(0)),
+    buckets: v.array(
+      v.object({
+        label: NonEmptySafeStringSchema,
+        periodStart: IsoDateTimeSchema,
+        periodEnd: IsoDateTimeSchema,
+        requestCount: v.pipe(v.number(), v.integer(), v.minValue(0)),
+        providerCallCount: v.pipe(v.number(), v.integer(), v.minValue(0)),
+        errorCount: v.pipe(v.number(), v.integer(), v.minValue(0)),
+      }),
+    ),
+  }),
+  recentErrors: v.array(
+    v.object({
+      id: UlidSchema,
+      occurredAt: IsoDateTimeSchema,
+      surface: v.picklist(["request", "provider"]),
+      category: NonEmptySafeStringSchema,
+      requestId: v.union([UlidSchema, v.null()]),
+    }),
+  ),
+  settingsWarnings: v.array(
+    v.object({
+      code: NonEmptySafeStringSchema,
+      title: NonEmptySafeStringSchema,
+      severity: v.picklist(["info", "warning"]),
+    }),
+  ),
 });
 export type OwnerDashboardSummaryResponse = v.InferOutput<
   typeof OwnerDashboardSummaryResponseSchema

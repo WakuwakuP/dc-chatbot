@@ -17,6 +17,13 @@ import {
   UnavailableNotice,
 } from "./routeState";
 
+function formatPeriod(start: string, end: string): string {
+  if (!start || !end) {
+    return "";
+  }
+  return `${start.slice(0, 10)} - ${end.slice(0, 10)}`;
+}
+
 export function HomeRoute() {
   const { owner } = useOwnerLayout();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
@@ -143,13 +150,127 @@ export function HomeRoute() {
             <CardHeader>
               <CardTitle>Usage metadata</CardTitle>
             </CardHeader>
-            <CardContent>
-              <EmptyState
-                title="usage metadata はまだありません"
-                description="Dashboard では現在の API が返す件数 metadata だけを表示します。"
-              />
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <StatusPill>{summary.usage.periodLabel}</StatusPill>
+                <span>{formatPeriod(summary.usage.periodStart, summary.usage.periodEnd)}</span>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div>
+                  <p className="text-xs uppercase text-muted">requests</p>
+                  <p className="text-xl font-semibold text-foreground">
+                    {summary.usage.requestCount}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase text-muted">provider calls</p>
+                  <p className="text-xl font-semibold text-foreground">
+                    {summary.usage.providerCallCount}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase text-muted">errors</p>
+                  <p className="text-xl font-semibold text-foreground">
+                    {summary.usage.errorCount}
+                  </p>
+                </div>
+              </div>
+              {summary.usage.buckets.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-left text-sm">
+                    <thead className="text-xs uppercase text-muted">
+                      <tr>
+                        <th className="py-2 pr-4 font-medium">bucket</th>
+                        <th className="py-2 pr-4 font-medium">requests</th>
+                        <th className="py-2 pr-4 font-medium">provider</th>
+                        <th className="py-2 pr-4 font-medium">errors</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {summary.usage.buckets.map((bucket) => (
+                        <tr
+                          className="border-t border-border"
+                          key={bucket.label}
+                        >
+                          <td className="py-2 pr-4 text-foreground">
+                            {bucket.label}
+                          </td>
+                          <td className="py-2 pr-4">{bucket.requestCount}</td>
+                          <td className="py-2 pr-4">
+                            {bucket.providerCallCount}
+                          </td>
+                          <td className="py-2 pr-4">{bucket.errorCount}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <EmptyState
+                  title="usage metadata はまだありません"
+                  description="表示できる usage bucket metadata がありません。"
+                />
+              )}
             </CardContent>
           </Card>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle>Recent errors</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {summary.recentErrors.length > 0 ? (
+                  summary.recentErrors.map((error) => (
+                    <div
+                      className="rounded-md border border-border px-3 py-2"
+                      key={`${error.surface}-${error.id}`}
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <StatusPill>{error.surface}</StatusPill>
+                        <span className="font-medium text-foreground">
+                          {error.category}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs">
+                        {error.occurredAt} / request ID:{" "}
+                        {error.requestId ?? "none"}
+                      </p>
+                    </div>
+                  ))
+                ) : (
+                  <EmptyState
+                    title="recent error metadata はありません"
+                    description="対象期間に表示できる safe error category はありません。"
+                  />
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Settings warnings</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {summary.settingsWarnings.length > 0 ? (
+                  summary.settingsWarnings.map((warning) => (
+                    <div
+                      className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
+                      key={warning.code}
+                    >
+                      <span className="text-foreground">{warning.title}</span>
+                      <StatusPill>{warning.severity}</StatusPill>
+                    </div>
+                  ))
+                ) : (
+                  <EmptyState
+                    title="settings warning はありません"
+                    description="Dashboard に表示する設定 warning metadata はありません。"
+                  />
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </>
       ) : null}
     </section>

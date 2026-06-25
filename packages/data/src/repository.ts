@@ -122,6 +122,42 @@ export type OwnerDashboardSummary = {
   candidateDiscordUserCount: number;
   pendingOwnerNotificationCount: number;
   automatedTriggerSourceCounts: { active: number; disabled: number };
+  usage: OwnerDashboardUsageSummary;
+  recentErrors: OwnerDashboardRecentError[];
+  settingsWarnings: OwnerDashboardSettingsWarning[];
+};
+
+export type OwnerDashboardUsageBucket = {
+  label: string;
+  periodStart: string;
+  periodEnd: string;
+  requestCount: number;
+  providerCallCount: number;
+  errorCount: number;
+};
+
+export type OwnerDashboardUsageSummary = {
+  periodStart: string;
+  periodEnd: string;
+  periodLabel: string;
+  requestCount: number;
+  providerCallCount: number;
+  errorCount: number;
+  buckets: OwnerDashboardUsageBucket[];
+};
+
+export type OwnerDashboardRecentError = {
+  id: string;
+  occurredAt: string;
+  surface: "request" | "provider";
+  category: string;
+  requestId: string | null;
+};
+
+export type OwnerDashboardSettingsWarning = {
+  code: string;
+  title: string;
+  severity: "info" | "warning";
 };
 
 export type BotSettingsRecord = {
@@ -283,6 +319,33 @@ type OwnerNotificationRow = {
   updated_at: string;
 };
 
+type UsageTotalRow = {
+  request_count?: number | null;
+  request_error_count?: number | null;
+  provider_call_count?: number | null;
+  provider_error_count?: number | null;
+};
+
+type RequestUsageBucketRow = {
+  bucket_date: string;
+  request_count: number;
+  request_error_count: number;
+};
+
+type ProviderUsageBucketRow = {
+  bucket_date: string;
+  provider_call_count: number;
+  provider_error_count: number;
+};
+
+type RecentErrorRow = {
+  id: string;
+  occurred_at: string;
+  surface: "request" | "provider";
+  category: string | null;
+  request_id: string | null;
+};
+
 type D1AllResult<T> = { results?: T[] };
 
 function mapMember(row: MemberRow): RegisteredMemberListItem {
@@ -410,6 +473,98 @@ async function allRows<T>(statement: D1PreparedStatement): Promise<T[]> {
 async function countFrom(statement: D1PreparedStatement): Promise<number> {
   const row = await statement.first<CountRow>();
   return row?.count ?? 0;
+}
+
+function numberFrom(value: number | null | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function startOfUtcDay(date: Date): Date {
+  return new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
+  );
+}
+
+function addUtcDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+function bucketLabel(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function createEmptyUsageSummary(nowIsoUtc: string): OwnerDashboardUsageSummary {
+  const periodEnd = new Date(nowIsoUtc);
+  const firstBucketStart = addUtcDays(startOfUtcDay(periodEnd), -6);
+  const buckets: OwnerDashboardUsageBucket[] = Array.from(
+    { length: 7 },
+    (_, index) => {
+      const bucketStart = addUtcDays(firstBucketStart, index);
+      const bucketEnd = addUtcDays(bucketStart, 1);
+      return {
+        label: bucketLabel(bucketStart),
+        periodStart: bucketStart.toISOString(),
+        periodEnd: bucketEnd.toISOString(),
+        requestCount: 0,
+        providerCallCount: 0,
+        errorCount: 0,
+      };
+    },
+  );
+
+  return {
+    periodStart: firstBucketStart.toISOString(),
+    periodEnd: periodEnd.toISOString(),
+    periodLabel: "Last 7 days",
+    requestCount: 0,
+    providerCallCount: 0,
+    errorCount: 0,
+    buckets,
+  };
+}
+
+function settingsWarningsFrom(
+  settings: OwnerSettingsRecord,
+): OwnerDashboardSettingsWarning[] {
+  const warnings: OwnerDashboardSettingsWarning[] = [];
+  const providerAccess = settings.providerConfig.configuredProviderAccess;
+
+  if (providerAccess.status === "not_configured") {
+    warnings.push({
+      code: "configured_provider_access_not_configured",
+      title: "Configured Provider Access is not configured",
+      severity: "warning",
+    });
+  } else if (providerAccess.status === "unavailable") {
+    warnings.push({
+      code: "configured_provider_access_unavailable",
+      title: "Configured Provider Access is unavailable",
+      severity: "warning",
+    });
+  }
+
+  if (!settings.botSettings.notificationOwnerDiscordUserId) {
+    warnings.push({
+      code: "notification_owner_missing",
+      title: "Owner Notification target is not set",
+      severity: "info",
+    });
+  }
+
+  if (
+    settings.promptSettings.length === 0 ||
+    settings.promptSettings.some((prompt) => !prompt.activeVersionId)
+  ) {
+    warnings.push({
+      code: "prompt_metadata_missing",
+      title: "Prompt settings metadata is incomplete",
+      severity: "info",
+    });
+  }
+
+  return warnings;
 }
 
 export class D1DcChatbotRepository {
@@ -639,7 +794,137 @@ export class D1DcChatbotRepository {
       .run();
   }
 
-  async getDashboardSummary(scope: OwnerScope): Promise<OwnerDashboardSummary> {
+  private async readAdminDashboardUsage(
+    nowIsoUtc: string,
+  ): Promise<OwnerDashboardUsageSummary> {
+    const usage = createEmptyUsageSummary(nowIsoUtc);
+    const totals = await this.db
+      .prepare(
+        `SELECT
+           (SELECT COUNT(*) FROM request_audit_metadata
+            WHERE created_at >= ? AND created_at <= ?) AS request_count,
+           (SELECT COUNT(*) FROM request_audit_metadata
+            WHERE created_at >= ? AND created_at <= ?
+              AND (status = 'failed' OR error_category IS NOT NULL)) AS request_error_count,
+           (SELECT COUNT(*) FROM provider_call_audit_metadata
+            WHERE created_at >= ? AND created_at <= ?) AS provider_call_count,
+           (SELECT COUNT(*) FROM provider_call_audit_metadata
+            WHERE created_at >= ? AND created_at <= ?
+              AND (status = 'failed' OR safe_error_category IS NOT NULL)) AS provider_error_count`,
+      )
+      .bind(
+        usage.periodStart,
+        usage.periodEnd,
+        usage.periodStart,
+        usage.periodEnd,
+        usage.periodStart,
+        usage.periodEnd,
+        usage.periodStart,
+        usage.periodEnd,
+      )
+      .first<UsageTotalRow>();
+
+    const requestBuckets = await allRows<RequestUsageBucketRow>(
+      this.db
+        .prepare(
+          `SELECT substr(created_at, 1, 10) AS bucket_date,
+                  COUNT(*) AS request_count,
+                  SUM(CASE WHEN status = 'failed' OR error_category IS NOT NULL THEN 1 ELSE 0 END)
+                    AS request_error_count
+           FROM request_audit_metadata
+           WHERE created_at >= ? AND created_at <= ?
+           GROUP BY substr(created_at, 1, 10)
+           ORDER BY bucket_date ASC`,
+        )
+        .bind(usage.periodStart, usage.periodEnd),
+    );
+    const providerBuckets = await allRows<ProviderUsageBucketRow>(
+      this.db
+        .prepare(
+          `SELECT substr(created_at, 1, 10) AS bucket_date,
+                  COUNT(*) AS provider_call_count,
+                  SUM(CASE WHEN status = 'failed' OR safe_error_category IS NOT NULL THEN 1 ELSE 0 END)
+                    AS provider_error_count
+           FROM provider_call_audit_metadata
+           WHERE created_at >= ? AND created_at <= ?
+           GROUP BY substr(created_at, 1, 10)
+           ORDER BY bucket_date ASC`,
+        )
+        .bind(usage.periodStart, usage.periodEnd),
+    );
+
+    const bucketByLabel = new Map(
+      usage.buckets.map((bucket) => [bucket.label, bucket]),
+    );
+    for (const row of requestBuckets) {
+      const bucket = bucketByLabel.get(row.bucket_date);
+      if (!bucket) {
+        continue;
+      }
+      bucket.requestCount = numberFrom(row.request_count);
+      bucket.errorCount += numberFrom(row.request_error_count);
+    }
+    for (const row of providerBuckets) {
+      const bucket = bucketByLabel.get(row.bucket_date);
+      if (!bucket) {
+        continue;
+      }
+      bucket.providerCallCount = numberFrom(row.provider_call_count);
+      bucket.errorCount += numberFrom(row.provider_error_count);
+    }
+
+    usage.requestCount = numberFrom(totals?.request_count);
+    usage.providerCallCount = numberFrom(totals?.provider_call_count);
+    usage.errorCount =
+      numberFrom(totals?.request_error_count) +
+      numberFrom(totals?.provider_error_count);
+
+    return usage;
+  }
+
+  private async readAdminDashboardRecentErrors(
+    periodStart: string,
+    periodEnd: string,
+  ): Promise<OwnerDashboardRecentError[]> {
+    const rows = await allRows<RecentErrorRow>(
+      this.db
+        .prepare(
+          `SELECT request_audit_id AS id,
+                  created_at AS occurred_at,
+                  'request' AS surface,
+                  COALESCE(error_category, status) AS category,
+                  request_id
+           FROM request_audit_metadata
+           WHERE created_at >= ? AND created_at <= ?
+             AND (status = 'failed' OR error_category IS NOT NULL)
+           UNION ALL
+           SELECT provider_call_id AS id,
+                  created_at AS occurred_at,
+                  'provider' AS surface,
+                  COALESCE(safe_error_category, status) AS category,
+                  request_id
+           FROM provider_call_audit_metadata
+           WHERE created_at >= ? AND created_at <= ?
+             AND (status = 'failed' OR safe_error_category IS NOT NULL)
+           ORDER BY occurred_at DESC
+           LIMIT 5`,
+        )
+        .bind(periodStart, periodEnd, periodStart, periodEnd),
+    );
+
+    return rows.map((row) => ({
+      id: row.id,
+      occurredAt: row.occurred_at,
+      surface: row.surface,
+      category: row.category ?? "unknown",
+      requestId: row.request_id,
+    }));
+  }
+
+  async getDashboardSummary(
+    scope: OwnerScope,
+    nowIsoUtc = new Date().toISOString(),
+  ): Promise<OwnerDashboardSummary> {
     const ownerFilter =
       scope.role === "admin_owner"
         ? ""
@@ -703,6 +988,18 @@ export class D1DcChatbotRepository {
         )
         .bind(...memberBinds),
     );
+    const usage =
+      scope.role === "admin_owner"
+        ? await this.readAdminDashboardUsage(nowIsoUtc)
+        : createEmptyUsageSummary(nowIsoUtc);
+    const recentErrors =
+      scope.role === "admin_owner"
+        ? await this.readAdminDashboardRecentErrors(
+            usage.periodStart,
+            usage.periodEnd,
+          )
+        : [];
+    const settings = await this.getOwnerSettings(nowIsoUtc);
 
     return {
       registeredMemberCounts: {
@@ -715,6 +1012,9 @@ export class D1DcChatbotRepository {
         active: activeSources,
         disabled: disabledSources,
       },
+      usage,
+      recentErrors,
+      settingsWarnings: settingsWarningsFrom(settings),
     };
   }
 

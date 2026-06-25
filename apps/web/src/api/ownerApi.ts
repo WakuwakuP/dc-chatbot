@@ -153,6 +153,18 @@ function readReplyMode(value: unknown): AutomatedTriggerSource["replyMode"] {
   return value === "channel_message" || value === "none" ? value : "reply";
 }
 
+function readRecentErrorSurface(
+  value: unknown,
+): DashboardSummary["recentErrors"][number]["surface"] {
+  return value === "provider" ? "provider" : "request";
+}
+
+function readSettingsWarningSeverity(
+  value: unknown,
+): DashboardSummary["settingsWarnings"][number]["severity"] {
+  return value === "warning" ? "warning" : "info";
+}
+
 function readNullableString(
   record: Record<string, unknown>,
   key: string,
@@ -258,6 +270,11 @@ function mapDashboardSummary(raw: unknown): DashboardSummary {
   )
     ? record.automatedTriggerSourceCounts
     : {};
+  const usage = isRecord(record.usage) ? record.usage : {};
+  const usagePeriodEnd =
+    readString(usage, "periodEnd") ?? new Date(0).toISOString();
+  const usagePeriodStart =
+    readString(usage, "periodStart") ?? usagePeriodEnd;
 
   return {
     owner: mapOwnerMe(record.owner),
@@ -273,16 +290,56 @@ function mapDashboardSummary(raw: unknown): DashboardSummary {
       active: readNumber(automatedTriggerSourceCounts, "active") ?? 0,
       disabled: readNumber(automatedTriggerSourceCounts, "disabled") ?? 0,
     },
+    usage: {
+      periodStart: usagePeriodStart,
+      periodEnd: usagePeriodEnd,
+      periodLabel: readString(usage, "periodLabel") ?? "Last 7 days",
+      requestCount: readNumber(usage, "requestCount") ?? 0,
+      providerCallCount: readNumber(usage, "providerCallCount") ?? 0,
+      errorCount: readNumber(usage, "errorCount") ?? 0,
+      buckets: readArray(usage.buckets).map((bucket) => ({
+        label: readString(bucket, "label") ?? "",
+        periodStart: readString(bucket, "periodStart") ?? "",
+        periodEnd: readString(bucket, "periodEnd") ?? "",
+        requestCount: readNumber(bucket, "requestCount") ?? 0,
+        providerCallCount: readNumber(bucket, "providerCallCount") ?? 0,
+        errorCount: readNumber(bucket, "errorCount") ?? 0,
+      })),
+    },
+    recentErrors: readArray(record.recentErrors).map((error) => ({
+      id: readString(error, "id") ?? "",
+      occurredAt: readString(error, "occurredAt") ?? "",
+      surface: readRecentErrorSurface(error.surface),
+      category: readString(error, "category") ?? "unknown",
+      requestId: readNullableString(error, "requestId"),
+    })),
+    settingsWarnings: readArray(record.settingsWarnings).map((warning) => ({
+      code: readString(warning, "code") ?? "",
+      title: readString(warning, "title") ?? "",
+      severity: readSettingsWarningSeverity(warning.severity),
+    })),
   };
 }
 
 export function dashboardFromOwnerMe(owner: OwnerMeResponse): DashboardSummary {
+  const fallbackPeriod = new Date(0).toISOString();
   return {
     owner,
     registeredMemberCounts: { active: 0, disabled: 0 },
     candidateDiscordUserCount: 0,
     pendingOwnerNotificationCount: 0,
     automatedTriggerSourceCounts: { active: 0, disabled: 0 },
+    usage: {
+      periodStart: fallbackPeriod,
+      periodEnd: fallbackPeriod,
+      periodLabel: "Unavailable",
+      requestCount: 0,
+      providerCallCount: 0,
+      errorCount: 0,
+      buckets: [],
+    },
+    recentErrors: [],
+    settingsWarnings: [],
   };
 }
 

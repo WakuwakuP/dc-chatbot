@@ -387,6 +387,43 @@ describe("API Worker routes", () => {
     });
   });
 
+  it("returns owner dashboard usage metadata without sensitive content fields", async () => {
+    const db = new FakeD1Database();
+    const response = await worker.fetch(
+      new Request("https://api.test/api/v1/owner/dashboard", {
+        headers: {
+          "x-dev-auth-secret": LOCAL_AUTH_BYPASS_SECRET,
+          "x-dev-access-subject": "admin@example.com",
+          "x-dev-owner-discord-user-id": "999",
+          "x-dev-owner-role": "admin_owner",
+        },
+      }),
+      { ...env, DB: db as unknown as D1Database },
+    );
+
+    expect(response.status).toBe(200);
+    const body = await readJson(response);
+    expect(body).toMatchObject({
+      owner: {
+        ownerDiscordUserId: "999",
+        role: "admin_owner",
+      },
+      usage: {
+        periodLabel: "Last 7 days",
+        requestCount: 0,
+        providerCallCount: 0,
+        errorCount: 0,
+      },
+      recentErrors: [],
+    });
+    expect(JSON.stringify(body)).not.toContain("messageContent");
+    expect(JSON.stringify(body)).not.toContain("promptBody");
+    expect(JSON.stringify(body)).not.toContain("responseText");
+    expect(JSON.stringify(body)).not.toContain("rawRequest");
+    expect(JSON.stringify(body)).not.toContain("rawResponse");
+    expect(JSON.stringify(body)).not.toContain("credential");
+  });
+
   it("rejects bot route without dev secret", async () => {
     const response = await worker.fetch(
       new Request("https://api.test/api/v1/bot/messages/intake", {

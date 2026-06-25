@@ -189,4 +189,61 @@ describe("D1DcChatbotRepository role-scoped mutations", () => {
     expect(sqlText).toContain("FROM provider_settings");
     expect(sqlText).not.toContain("chatgpt_subscription_connections");
   });
+
+  it("aggregates Admin Owner dashboard usage from metadata-only audit tables", async () => {
+    const db = new RecordingD1Database();
+    const repository = new D1DcChatbotRepository(db as unknown as D1Database);
+
+    const summary = await repository.getDashboardSummary(
+      { ownerDiscordUserId: "999", role: "admin_owner" },
+      "2026-06-20T12:00:00.000Z",
+    );
+
+    expect(summary.usage.periodStart).toBe("2026-06-14T00:00:00.000Z");
+    expect(summary.usage.periodEnd).toBe("2026-06-20T12:00:00.000Z");
+    expect(summary.usage.buckets).toHaveLength(7);
+    expect(summary.settingsWarnings.map((warning) => warning.code)).toEqual([
+      "notification_owner_missing",
+      "prompt_metadata_missing",
+    ]);
+
+    const sqlText = db.statements.map((item) => item.sql).join("\n");
+    expect(sqlText).toContain("FROM request_audit_metadata");
+    expect(sqlText).toContain("FROM provider_call_audit_metadata");
+    expect(sqlText).toContain("request_audit_id AS id");
+    expect(sqlText).toContain("provider_call_id AS id");
+    const auditSqlText = db.statements
+      .filter(
+        (item) =>
+          item.sql.includes("request_audit_metadata") ||
+          item.sql.includes("provider_call_audit_metadata"),
+      )
+      .map((item) => item.sql)
+      .join("\n");
+    expect(auditSqlText).not.toContain("message_content");
+    expect(auditSqlText).not.toContain("prompt_body");
+    expect(auditSqlText).not.toContain("response_text");
+    expect(auditSqlText).not.toContain("raw_request");
+    expect(auditSqlText).not.toContain("raw_response");
+    expect(auditSqlText).not.toContain("credential");
+  });
+
+  it("keeps Regular Owner dashboard audit usage empty when audit rows lack owner scope", async () => {
+    const db = new RecordingD1Database();
+    const repository = new D1DcChatbotRepository(db as unknown as D1Database);
+
+    const summary = await repository.getDashboardSummary(
+      { ownerDiscordUserId: "111", role: "regular_owner" },
+      "2026-06-20T12:00:00.000Z",
+    );
+
+    expect(summary.usage.requestCount).toBe(0);
+    expect(summary.usage.providerCallCount).toBe(0);
+    expect(summary.usage.errorCount).toBe(0);
+    expect(summary.recentErrors).toEqual([]);
+
+    const sqlText = db.statements.map((item) => item.sql).join("\n");
+    expect(sqlText).not.toContain("FROM request_audit_metadata");
+    expect(sqlText).not.toContain("FROM provider_call_audit_metadata");
+  });
 });

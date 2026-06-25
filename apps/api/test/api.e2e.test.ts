@@ -821,6 +821,117 @@ describe("API Worker routes", () => {
     ).toContain("automated_trigger");
   });
 
+  it("passes safe attachment metadata transiently for allowed non-automated responses", async () => {
+    const db = new FakeD1Database(["300"]);
+    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as {
+        messages: { content: string }[];
+      };
+      expect(JSON.stringify(body)).toContain("Attachment metadata only");
+      expect(JSON.stringify(body)).toContain("image=1");
+      expect(JSON.stringify(body)).toContain("image/png");
+      expect(JSON.stringify(body)).not.toContain("700");
+      return new Response(
+        JSON.stringify({
+          model: "meta/llama-3.1-70b-instruct",
+          choices: [{ message: { content: "ok" } }],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await worker.fetch(
+      new Request("https://api.test/api/v1/bot/messages/respond", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-dev-auth-secret": LOCAL_AUTH_BYPASS_SECRET,
+          "x-dev-bot-service": "true",
+        },
+        body: JSON.stringify({
+          requestId: "01HY0000000000000000000000",
+          triggerMessageId: "100",
+          triggerAuthorDiscordUserId: "300",
+          triggerKind: "dm",
+          model: "meta/llama-3.1-70b-instruct",
+          conversationContextMessageIds: [],
+          attachmentMetadata: [
+            {
+              attachmentId: "700",
+              kind: "image",
+              contentType: "image/png",
+              sizeBytes: 1024,
+            },
+          ],
+        }),
+      }),
+      {
+        ...env,
+        DB: db as unknown as D1Database,
+        LLM_PROVIDER: "nvidia_nim",
+        NVIDIA_NIM_BEARER_TOKEN: "1",
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expectNoDbBindingString(db, ["image/png", "Attachment metadata only"]);
+  });
+
+  it("drops attachment metadata before provider calls for Automated Trigger Sources", async () => {
+    const db = new FakeD1Database([], [], ["300"]);
+    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      expect(JSON.stringify(body)).not.toContain("Attachment metadata only");
+      expect(JSON.stringify(body)).not.toContain("image/png");
+      expect(JSON.stringify(body)).not.toContain("700");
+      return new Response(
+        JSON.stringify({
+          model: "meta/llama-3.1-70b-instruct",
+          choices: [{ message: { content: "ok" } }],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await worker.fetch(
+      new Request("https://api.test/api/v1/bot/messages/respond", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-dev-auth-secret": LOCAL_AUTH_BYPASS_SECRET,
+          "x-dev-bot-service": "true",
+        },
+        body: JSON.stringify({
+          requestId: "01HY0000000000000000000000",
+          triggerMessageId: "100",
+          triggerAuthorDiscordUserId: "300",
+          triggerKind: "automated_trigger_source",
+          model: "meta/llama-3.1-70b-instruct",
+          conversationContextMessageIds: ["100"],
+          attachmentMetadata: [
+            {
+              attachmentId: "700",
+              kind: "image",
+              contentType: "image/png",
+              sizeBytes: 1024,
+            },
+          ],
+        }),
+      }),
+      {
+        ...env,
+        DB: db as unknown as D1Database,
+        LLM_PROVIDER: "nvidia_nim",
+        NVIDIA_NIM_BEARER_TOKEN: "1",
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expectNoDbBindingString(db, ["image/png", "Attachment metadata only"]);
+  });
+
   it("returns metadata-only no-response decision before provider availability check", async () => {
     const db = new FakeD1Database(["300"]);
     const fetchMock = vi.fn();

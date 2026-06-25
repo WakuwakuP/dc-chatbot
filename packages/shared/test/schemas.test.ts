@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  AttachmentMetadataInputSchema,
   BotMessageIntakeRequestSchema,
+  BotRespondRequestSchema,
   BotOwnerNotificationDeliveryListResponseSchema,
   BotOwnerNotificationDeliveryUpdateRequestSchema,
   BotRespondResponseSchema,
@@ -12,6 +14,58 @@ import {
   UpdatePromptSettingsMetadataRequestSchema,
   parseJson,
 } from "../src/index";
+
+describe("AttachmentMetadataInputSchema", () => {
+  it("accepts safe bounded attachment metadata", () => {
+    const parsed = parseJson(AttachmentMetadataInputSchema, {
+      attachmentId: "123",
+      kind: "image",
+      contentType: "image/png",
+      sizeBytes: 1024,
+      nameLength: 8,
+    });
+
+    expect(parsed).toEqual({
+      attachmentId: "123",
+      kind: "image",
+      contentType: "image/png",
+      sizeBytes: 1024,
+      nameLength: 8,
+    });
+  });
+
+  it("rejects oversized attachment metadata", () => {
+    expect(() =>
+      parseJson(AttachmentMetadataInputSchema, {
+        attachmentId: "123",
+        kind: "image",
+        sizeBytes: 10 * 1024 * 1024 + 1,
+      }),
+    ).toThrow();
+  });
+
+  it("rejects attachment URL fields", () => {
+    expect(() =>
+      parseJson(AttachmentMetadataInputSchema, {
+        attachmentId: "123",
+        kind: "image",
+        sizeBytes: 1024,
+        attachmentUrl: "forbidden",
+      }),
+    ).toThrow();
+  });
+
+  it("rejects arbitrary attachment content type text", () => {
+    expect(() =>
+      parseJson(AttachmentMetadataInputSchema, {
+        attachmentId: "123",
+        kind: "text",
+        contentType: "not mime text",
+        sizeBytes: 1024,
+      }),
+    ).toThrow();
+  });
+});
 
 describe("BotMessageIntakeRequestSchema", () => {
   it("accepts metadata-only message intake", () => {
@@ -29,6 +83,51 @@ describe("BotMessageIntakeRequestSchema", () => {
 
     expect(parsed.triggerKind).toBe("dm");
     expect("messageContent" in parsed).toBe(false);
+  });
+});
+
+describe("BotRespondRequestSchema", () => {
+  it("accepts bounded safe attachment metadata without attachment content", () => {
+    const parsed = parseJson(BotRespondRequestSchema, {
+      requestId: "01HY0000000000000000000000",
+      triggerMessageId: "123",
+      triggerAuthorDiscordUserId: "789",
+      triggerKind: "dm",
+      model: "fake-model",
+      conversationContextMessageIds: [],
+      attachmentMetadata: [
+        {
+          attachmentId: "456",
+          kind: "text",
+          contentType: "text/plain",
+          sizeBytes: 512,
+        },
+      ],
+    });
+
+    expect(parsed.attachmentMetadata?.[0]?.kind).toBe("text");
+    expect(JSON.stringify(parsed)).not.toContain("attachmentUrl");
+    expect(JSON.stringify(parsed)).not.toContain("filename");
+    expect(JSON.stringify(parsed)).not.toContain("attachmentBytes");
+    expect(JSON.stringify(parsed)).not.toContain("attachmentContent");
+  });
+
+  it("rejects attachment metadata beyond the per-request bound", () => {
+    expect(() =>
+      parseJson(BotRespondRequestSchema, {
+        requestId: "01HY0000000000000000000000",
+        triggerMessageId: "123",
+        triggerAuthorDiscordUserId: "789",
+        triggerKind: "dm",
+        model: "fake-model",
+        conversationContextMessageIds: [],
+        attachmentMetadata: Array.from({ length: 11 }, (_value, index) => ({
+          attachmentId: String(1000 + index),
+          kind: "other",
+          sizeBytes: 1,
+        })),
+      }),
+    ).toThrow();
   });
 });
 

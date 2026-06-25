@@ -1151,6 +1151,13 @@ async function handleBotRespond(request: Request, env: Env): Promise<Response> {
     );
   }
 
+  const safeAttachmentMetadata =
+    respondRequest.triggerKind === "automated_trigger_source"
+      ? undefined
+      : respondRequest.attachmentMetadata;
+  const attachmentMetadataInput = safeAttachmentMetadata
+    ? { attachmentMetadata: safeAttachmentMetadata }
+    : {};
   const providerRequest = contextSelection.selectedConversationContextMessages
     ? {
         requestId: respondRequest.requestId,
@@ -1160,6 +1167,7 @@ async function handleBotRespond(request: Request, env: Env): Promise<Response> {
           contextSelection.selectedContextMessageIds,
         conversationContextMessages:
           contextSelection.selectedConversationContextMessages,
+        ...attachmentMetadataInput,
       }
     : {
         requestId: respondRequest.requestId,
@@ -1167,6 +1175,7 @@ async function handleBotRespond(request: Request, env: Env): Promise<Response> {
         triggerKind: respondRequest.triggerKind,
         conversationContextMessageIds:
           contextSelection.selectedContextMessageIds,
+        ...attachmentMetadataInput,
       };
   let providerResponse: ProviderGenerateResponse;
   try {

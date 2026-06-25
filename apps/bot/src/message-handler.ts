@@ -1,5 +1,10 @@
 import {
+  ATTACHMENT_CONTENT_TYPE_PATTERN,
+  MAX_ATTACHMENT_METADATA_COUNT,
+  MAX_ATTACHMENT_METADATA_SIZE_BYTES,
   createUlid,
+  type AttachmentKind,
+  type AttachmentMetadataInput,
   type BotMessageIntakeRequest,
   type BotMessageIntakeResponse,
   type BotRespondRequest,
@@ -7,7 +12,7 @@ import {
   type ConversationContextMessageInput,
   type TriggerKind,
 } from "@dc-chatbot/shared";
-import type { Client, Message } from "discord.js";
+import type { Attachment, Client, Message } from "discord.js";
 import type { BotApiClient } from "./api-client";
 import type { BotConfig } from "./config";
 import { splitDiscordReply } from "./reply-split";
@@ -25,6 +30,16 @@ export const RESPONSE_GENERATION_FAILED_MESSAGE =
 
 const TYPING_REFRESH_INTERVAL_MS = 8_000;
 const MAX_CONTEXT_MESSAGE_CONTENT_LENGTH = 2_000;
+const TEXT_ATTACHMENT_EXTENSIONS = new Set([
+  ".txt",
+  ".md",
+  ".json",
+  ".log",
+  ".csv",
+  ".yaml",
+  ".yml",
+  ".xml",
+]);
 
 type MessageCollectionLike = {
   values(): IterableIterator<Message>;
@@ -146,6 +161,55 @@ function buildIntakeRequest(
   }
 
   return request;
+}
+
+function buildAttachmentMetadata(
+  message: Message,
+): AttachmentMetadataInput[] {
+  return [...message.attachments.values()]
+    .filter(
+      (attachment) => attachment.size <= MAX_ATTACHMENT_METADATA_SIZE_BYTES,
+    )
+    .slice(0, MAX_ATTACHMENT_METADATA_COUNT)
+    .map((attachment) => {
+      const metadata: AttachmentMetadataInput = {
+        attachmentId: attachment.id,
+        kind: classifyAttachmentKind(attachment),
+        sizeBytes: attachment.size,
+      };
+      if (
+        typeof attachment.contentType === "string" &&
+        attachment.contentType.length <= 120 &&
+        ATTACHMENT_CONTENT_TYPE_PATTERN.test(attachment.contentType)
+      ) {
+        metadata.contentType = attachment.contentType;
+      }
+      if (typeof attachment.name === "string") {
+        metadata.nameLength = Math.min(attachment.name.length, 255);
+      }
+      return metadata;
+    });
+}
+
+function classifyAttachmentKind(attachment: Attachment): AttachmentKind {
+  const contentType = attachment.contentType?.toLowerCase() ?? "";
+  if (contentType.startsWith("image/")) {
+    return "image";
+  }
+  if (contentType.startsWith("text/") || isTextAttachmentName(attachment.name)) {
+    return "text";
+  }
+  return "other";
+}
+
+function isTextAttachmentName(name: string | null): boolean {
+  if (!name) {
+    return false;
+  }
+  const lowerName = name.toLowerCase();
+  return [...TEXT_ATTACHMENT_EXTENSIONS].some((extension) =>
+    lowerName.endsWith(extension),
+  );
 }
 
 function shouldProceedToRespond(intake: BotMessageIntakeResponse): boolean {
@@ -588,6 +652,9 @@ export async function handleDiscordMessageCreate(
       ),
       conversationContextMessages: contextMessages,
     };
+    if (triggerKind !== "automated_trigger_source") {
+      responseRequest.attachmentMetadata = buildAttachmentMetadata(message);
+    }
 
     try {
       const response = await apiClient.requestResponse(responseRequest);

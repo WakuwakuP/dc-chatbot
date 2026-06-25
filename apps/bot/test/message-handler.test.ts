@@ -82,8 +82,20 @@ function createMessage(options: {
   mentionedBot?: boolean;
   bot?: boolean;
   content?: string;
+  attachments?: {
+    id: string;
+    contentType?: string | null;
+    size: number;
+    name?: string | null;
+  }[];
   reference?: { messageId: string; channelId?: string } | null;
 }): Message {
+  const attachments = new Map(
+    (options.attachments ?? []).map((attachment) => [
+      attachment.id,
+      attachment,
+    ]),
+  );
   return {
     id: options.id,
     channelId: "20",
@@ -97,7 +109,10 @@ function createMessage(options: {
     },
     webhookId: null,
     content: options.content ?? "x",
-    attachments: { size: 0 },
+    attachments: {
+      size: attachments.size,
+      values: () => attachments.values(),
+    },
     createdTimestamp: Number(options.id),
     member: null,
     reference: options.reference ?? null,
@@ -282,6 +297,122 @@ describe("handleDiscordMessageCreate", () => {
     );
     expect(channel.sendTyping).toHaveBeenCalled();
     expect(triggerMessage.reply).toHaveBeenCalledWith("r");
+  });
+
+  it("sends bounded safe attachment metadata to respond for allowed non-automated flows", async () => {
+    const channel = createChannel();
+    const triggerMessage = createMessage({
+      id: "8",
+      authorId: "100",
+      channel,
+      attachments: [
+        { id: "700", contentType: "image/png", size: 1024 },
+        { id: "701", contentType: "text/plain", size: 2048 },
+      ],
+    });
+    const apiClient = createApiClient();
+    vi.mocked(apiClient.intakeMessage).mockResolvedValue({
+      requestId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      action: "respond_without_context",
+      reason: "allowed_dm",
+    });
+    vi.mocked(apiClient.requestResponse).mockResolvedValue({
+      requestId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      decision: {
+        shouldRespond: true,
+        reason: "dm_allowed",
+      },
+      replyChunks: ["r"],
+      providerCallId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    });
+
+    await handleDiscordMessageCreate(
+      triggerMessage,
+      createClient(),
+      BASE_CONFIG,
+      apiClient,
+      createLogger(),
+    );
+
+    expect(apiClient.intakeMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachmentCount: 2,
+      }),
+    );
+    expect(apiClient.intakeMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachmentMetadata: expect.anything(),
+      }),
+    );
+    expect(apiClient.requestResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachmentMetadata: [
+          {
+            attachmentId: "700",
+            kind: "image",
+            contentType: "image/png",
+            sizeBytes: 1024,
+          },
+          {
+            attachmentId: "701",
+            kind: "text",
+            contentType: "text/plain",
+            sizeBytes: 2048,
+          },
+        ],
+      }),
+    );
+  });
+
+  it("skips attachment metadata for Automated Trigger Sources", async () => {
+    const channel = createChannel();
+    const triggerMessage = createMessage({
+      id: "9",
+      authorId: "100",
+      channel,
+      bot: true,
+      attachments: [{ id: "702", contentType: "image/png", size: 1024 }],
+    });
+    const apiClient = createApiClient();
+    vi.mocked(apiClient.intakeMessage).mockResolvedValue({
+      requestId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      action: "fetch_context",
+      reason: "allowed_automated_source",
+      contextFetchPlan: {
+        kind: "automated_trigger_only",
+        limit: 1,
+        includeTriggerMessage: true,
+      },
+    });
+    vi.mocked(apiClient.requestResponse).mockResolvedValue({
+      requestId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      decision: {
+        shouldRespond: true,
+        reason: "automated_trigger_source",
+      },
+      replyChunks: ["r"],
+      providerCallId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    });
+
+    await handleDiscordMessageCreate(
+      triggerMessage,
+      createClient(),
+      BASE_CONFIG,
+      apiClient,
+      createLogger(),
+    );
+
+    expect(apiClient.intakeMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        triggerKind: "automated_trigger_source",
+        attachmentCount: 1,
+      }),
+    );
+    expect(apiClient.requestResponse).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        attachmentMetadata: expect.anything(),
+      }),
+    );
   });
 
   it("does not post a Discord reply when final Response Decision skips", async () => {

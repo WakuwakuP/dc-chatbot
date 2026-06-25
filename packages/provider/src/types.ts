@@ -1,4 +1,5 @@
 import type {
+  AttachmentMetadataInput,
   ConfiguredProviderAccessStatus,
   ConversationContextMessageInput,
   ProviderKind,
@@ -22,6 +23,7 @@ export type ProviderGenerateRequest = {
   triggerKind: TriggerKind;
   conversationContextMessageIds: readonly string[];
   conversationContextMessages?: readonly ConversationContextMessageInput[];
+  attachmentMetadata?: readonly AttachmentMetadataInput[];
 };
 
 export type ProviderGenerateResponse = {

@@ -451,6 +451,41 @@ export type CleanupRunMetadata = v.InferOutput<typeof CleanupRunMetadataSchema>;
 export const MessageContentSchema = v.pipe(v.string(), v.maxLength(2000));
 export type MessageContent = v.InferOutput<typeof MessageContentSchema>;
 
+export const MAX_ATTACHMENT_METADATA_COUNT = 10;
+export const MAX_ATTACHMENT_METADATA_SIZE_BYTES = 10 * 1024 * 1024;
+export const ATTACHMENT_CONTENT_TYPE_PATTERN =
+  /^[a-z0-9][a-z0-9.+-]{0,63}\/[a-z0-9][a-z0-9.+-]{0,63}$/iu;
+
+export const AttachmentKindSchema = v.picklist(["image", "text", "other"]);
+export type AttachmentKind = v.InferOutput<typeof AttachmentKindSchema>;
+
+export const AttachmentMetadataInputSchema = v.strictObject({
+  attachmentId: DiscordSnowflakeSchema,
+  kind: AttachmentKindSchema,
+  contentType: v.optional(
+    v.union([
+      v.pipe(
+        v.string(),
+        v.maxLength(120),
+        v.regex(ATTACHMENT_CONTENT_TYPE_PATTERN),
+      ),
+      v.null(),
+    ]),
+  ),
+  sizeBytes: v.pipe(
+    v.number(),
+    v.integer(),
+    v.minValue(0),
+    v.maxValue(MAX_ATTACHMENT_METADATA_SIZE_BYTES),
+  ),
+  nameLength: v.optional(
+    v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(255)),
+  ),
+});
+export type AttachmentMetadataInput = v.InferOutput<
+  typeof AttachmentMetadataInputSchema
+>;
+
 export const BotMessageIntakeRequestSchema = v.object({
   requestId: UlidSchema,
   messageId: DiscordSnowflakeSchema,
@@ -550,6 +585,12 @@ export const BotRespondRequestSchema = v.object({
   conversationContextMessageIds: v.array(DiscordSnowflakeSchema),
   conversationContextMessages: v.optional(
     v.array(ConversationContextMessageInputSchema),
+  ),
+  attachmentMetadata: v.optional(
+    v.pipe(
+      v.array(AttachmentMetadataInputSchema),
+      v.maxLength(MAX_ATTACHMENT_METADATA_COUNT),
+    ),
   ),
 });
 export type BotRespondRequest = v.InferOutput<typeof BotRespondRequestSchema>;

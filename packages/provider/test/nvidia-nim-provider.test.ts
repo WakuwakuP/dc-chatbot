@@ -64,6 +64,60 @@ describe("NvidiaNimLLMProvider", () => {
     });
   });
 
+  it("includes only safe attachment metadata in the transient provider payload", async () => {
+    const fetchMock = vi.fn(
+      async (_input: string | URL | Request, init: RequestInit | undefined) => {
+        const body = JSON.parse(String(init?.body)) as {
+          messages: readonly { role: string; content: string }[];
+        };
+        const serializedBody = JSON.stringify(body);
+        expect(serializedBody).toContain("Attachment metadata only");
+        expect(serializedBody).toContain("image=1");
+        expect(serializedBody).toContain("text=1");
+        expect(serializedBody).toContain("image/png");
+        expect(serializedBody).not.toContain("700");
+        expect(serializedBody).not.toContain("attachmentId");
+
+        return new Response(
+          JSON.stringify({
+            model: "meta/llama-3.1-70b-instruct",
+            choices: [{ message: { content: "ok" } }],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      },
+    );
+    const provider = new NvidiaNimLLMProvider({
+      bearerToken: "x",
+      fetch: fetchMock,
+      providerCallIdFactory: () => TEST_PROVIDER_CALL_ID,
+    });
+
+    await provider.generateResponse({
+      requestId: "01HY0000000000000000000000",
+      model: "meta/llama-3.1-70b-instruct",
+      triggerKind: "dm",
+      conversationContextMessageIds: [],
+      attachmentMetadata: [
+        {
+          attachmentId: "700",
+          kind: "image",
+          contentType: "image/png",
+          sizeBytes: 1024,
+          nameLength: 11,
+        },
+        {
+          attachmentId: "701",
+          kind: "text",
+          contentType: "text/plain",
+          sizeBytes: 2048,
+        },
+      ],
+    });
+
+    expect(fetchMock).toHaveBeenCalled();
+  });
+
   it("maps missing NVIDIA NIM API Key configuration to a safe category", () => {
     expect(
       () =>

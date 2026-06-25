@@ -1,4 +1,5 @@
 import { createUlid } from "@dc-chatbot/shared";
+import type { AttachmentMetadataInput } from "@dc-chatbot/shared";
 import type {
   LLMProvider,
   ProviderGenerateRequest,
@@ -150,6 +151,13 @@ function buildMessages(
     });
   }
 
+  if (request.attachmentMetadata && request.attachmentMetadata.length > 0) {
+    messages.push({
+      role: "user",
+      content: buildAttachmentMetadataSummary(request.attachmentMetadata),
+    });
+  }
+
   if (messages.length === 1) {
     messages.push({
       role: "user",
@@ -158,6 +166,42 @@ function buildMessages(
   }
 
   return messages;
+}
+
+function buildAttachmentMetadataSummary(
+  attachmentMetadata: readonly AttachmentMetadataInput[],
+): string {
+  const counts = {
+    image: 0,
+    text: 0,
+    other: 0,
+  };
+  let totalSizeBytes = 0;
+  let maxSizeBytes = 0;
+  for (const attachment of attachmentMetadata) {
+    counts[attachment.kind] += 1;
+    totalSizeBytes += attachment.sizeBytes;
+    maxSizeBytes = Math.max(maxSizeBytes, attachment.sizeBytes);
+  }
+
+  const contentTypes = [
+    ...new Set(
+      attachmentMetadata
+        .map((attachment) => attachment.contentType)
+        .filter((contentType): contentType is string => Boolean(contentType)),
+    ),
+  ].slice(0, 10);
+
+  return [
+    "Attachment metadata only is available for this Response Trigger.",
+    `counts image=${counts.image} text=${counts.text} other=${counts.other}`,
+    `totalSizeBytes=${totalSizeBytes}`,
+    `maxSizeBytes=${maxSizeBytes}`,
+    contentTypes.length > 0 ? `contentTypes=${contentTypes.join(",")}` : null,
+    "Attachment URLs, bytes, filenames, and contents were not provided.",
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
 }
 
 function mapHttpStatusToSafeCategory(

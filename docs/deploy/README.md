@@ -120,8 +120,8 @@ Deployment and runtime logs must not include:
 - selected Conversation Context content
 - prompt body
 - response text
+- NVIDIA NIM API key / bearer token
 - plaintext credential material
-- ChatGPT credential history
 - attachment URLs or bytes
 - provider raw request/response body
 

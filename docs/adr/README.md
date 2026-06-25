@@ -9,23 +9,24 @@
 - 番号が大きい ADR ほど後続の判断です。
 - 同じ領域で判断が重なる場合は、後続 ADR の内容を優先して解釈してください。
 - ADR は原則として設計上の制約です。実装の都合で変更する場合は、新しい ADR を追加するか既存 ADR を更新してください。
+- ADR 0059 は ChatGPT Subscription Connection を前提にした provider credential / connection lifecycle / connection assignment の判断を supersede します。古い ADR の該当部分は historical context として扱い、Private Bot authorization、metadata-only audit、retention、API/Bot/provider 境界などの非競合部分だけを継続して使います。
 
 ## 主要テーマ
 
 ### セキュリティ / プライバシー
 
-- ChatGPT Subscription Connection credential は application-encrypted ciphertext として D1 に保存します。
-- Master key は Cloudflare secrets に置き、frontend / Bot Worker / repository へ出しません。
-- Discord message content、Conversation Context content、prompt、response text、credential、attachment URL/bytes、provider raw body は保存しません。
+- Production provider credential は NVIDIA NIM API key で、API Worker secret として扱います。
+- NVIDIA NIM API key / bearer token は D1、frontend、Bot Worker、repository、audit、log へ出しません。
+- Discord message content、Conversation Context content、prompt、response text、NVIDIA NIM API key / bearer token、attachment URL/bytes、provider raw body は保存しません。
 - audit/log は metadata-only とします。
 
-関連 ADR: 0001, 0002, 0003, 0032, 0039, 0043, 0048, 0053, 0054
+関連 ADR: 0001, 0002, 0003, 0032, 0039, 0043, 0048, 0053, 0054, 0059
 
 ### Cloudflare / Bot / API 境界
 
 - Control Plane は Cloudflare Workers API と Cloudflare Pages frontend に分離します。
 - Bot Worker は `discord.js` の長寿命 Node.js process として実行します。
-- Bot Worker は D1 と credential に直接アクセスせず、Cloudflare Access Service Token で bot route を呼びます。
+- Bot Worker は D1 と NVIDIA NIM API key / bearer token に直接アクセスせず、Cloudflare Access Service Token で bot route を呼びます。
 - Owner route と Bot route は `/api/v1/owner/*` と `/api/v1/bot/*` に分けます。
 
 関連 ADR: 0004, 0005, 0006, 0022, 0023, 0024, 0027, 0040, 0044
@@ -39,34 +40,36 @@
 
 関連 ADR: 0007, 0008, 0013, 0014, 0015, 0019, 0020, 0021, 0028, 0029, 0030, 0031, 0045, 0046, 0047
 
-### Owner / Registered Member / connection assignment
+### Owner / Registered Member / provider access
 
-- MVP では Registered Member は割り当てられた Owner Discord User の ChatGPT Subscription Connection を使います。
+- MVP では Registered Member は owner-controlled authorization と Configured Provider Access によって bot を使います。
+- Production provider credential は deployment-scoped NVIDIA NIM API key であり、per-owner / per-member provider credential assignment は行いません。
 - Owner は Admin Owner と Regular Owner に分けます。
-- Regular Owner が登録した member は、その Regular Owner 自身の connection に割り当てます。
+- Regular Owner が登録した member は、その Regular Owner の management scope に割り当てます。
 - Cloudflare Access identity は Owner record に map します。
 
-関連 ADR: 0009, 0010, 0011, 0012, 0036, 0037, 0038, 0040
+関連 ADR: 0009, 0010, 0011, 0012, 0036, 0037, 0038, 0040, 0059
 
 ### Provider / response generation
 
-- ChatGPT/Codex subscription backend は API Worker から provider adapter 経由で呼びます。
+- NVIDIA NIM provider backend は API Worker から provider adapter 経由で呼びます。
 - Provider-specific protocol、token handling、safe error mapping は adapter に閉じ込めます。
 - Provider output は内部的には streaming し、Discord には最終応答または分割済み chunk を投稿します。
+- ADR 0059 は ADR 0058 と古い ChatGPT Subscription Connection 前提の provider/credential lifecycle 判断を supersede します。
 
-関連 ADR: 0016, 0017, 0018, 0033, 0034, 0041, 0042, 0052, 0058
+関連 ADR: 0016, 0017, 0018, 0033, 0034, 0041, 0042, 0052, 0058, 0059
 
 ### 本実装の workspace / directory structure
 
 - pnpm workspace で `apps/*` と `packages/*` を分けます。
-- `apps/api` は Cloudflare Workers API として、auth、D1、credential handling、provider calls、audit を所有します。
+- `apps/api` は Cloudflare Workers API として、auth、D1、NVIDIA NIM API key handling、provider calls、audit を所有します。
 - `apps/web` は Cloudflare Pages frontend として、Vite + React + React Router + Tailwind CSS + shadcn/ui の Owner Discord User 向け management UI を所有します。
 - `apps/bot` は Node.js + `discord.js` の Bot Worker として、Discord Gateway と返信投稿を所有します。
 - `packages/shared` は API/Web/Bot 間 DTO と Valibot schemas を所有します。
 - `packages/domain`、`packages/data`、`packages/provider` は runtime 非依存 domain helper、Drizzle ORM による D1 data access、provider adapter の境界として使います。
 - `apps/api-spike` は compatibility/reference spike であり、production directory structure の中心として扱いません。
 
-関連 ADR: 0022, 0023, 0025, 0027, 0049, 0052, 0056, 0057
+関連 ADR: 0022, 0023, 0025, 0027, 0049, 0052, 0056, 0057, 0059
 
 ### Data layer / D1 / tooling
 
@@ -141,7 +144,8 @@
 | [0055](0055-use-targeted-d1-indexes-and-core-foreign-keys.md)                | Use targeted D1 indexes and core foreign keys                                   |
 | [0056](0056-use-drizzle-for-d1-data-layer.md)                                | Use Drizzle ORM for the D1 data layer                                           |
 | [0057](0057-use-vite-react-router-tailwind-shadcn-for-web-frontend.md)       | Use Vite, React, React Router, Tailwind CSS, and shadcn/ui for the web frontend |
-| [0058](0058-support-nvidia-nim-llm-provider.md)                              | Support NVIDIA NIM as an LLM provider                                           |
+| [0058](0058-support-nvidia-nim-llm-provider.md)                              | Support NVIDIA NIM as an LLM provider (superseded by ADR 0059)                  |
+| [0059](0059-use-nvidia-nim-api-key-as-provider-credential.md)                | Use NVIDIA NIM API key as provider credential                                   |
 
 ## 新しい ADR を追加するとき
 

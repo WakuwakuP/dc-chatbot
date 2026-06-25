@@ -1,5 +1,7 @@
 # Support NVIDIA NIM as an LLM provider
 
+Status: Superseded by ADR 0059 for provider strategy and credential model.
+
 The API may use NVIDIA NIM for response generation through the provider adapter boundary when `LLM_PROVIDER=nvidia_nim` is configured. The Bot Worker still calls only `/api/v1/bot/*`; provider-specific protocol, bearer token handling, and safe error mapping stay in `packages/provider`.
 
 This is a generation-backend option, not a replacement for Owner / Registered Member authorization. The API still resolves or validates the Effective ChatGPT Subscription Connection before generation so the existing private-bot access boundary remains explicit.

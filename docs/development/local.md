@@ -9,7 +9,7 @@ pnpm install
 cp .env.example .env
 ```
 
-If `.env.example` is unavailable in your checkout, create a local `.env` with only development values. Do not put production Discord Bot tokens, ChatGPT Subscription Connection credential material, prompt bodies, response text, attachment URLs, or provider raw bodies in `.env` or logs.
+If `.env.example` is unavailable in your checkout, create a local `.env` with only development values. Do not put production Discord Bot tokens, production NVIDIA NIM API keys, prompt bodies, response text, attachment URLs, or provider raw bodies in `.env` or logs. Real local NVIDIA NIM testing may use a developer-only NVIDIA NIM bearer token in an uncommitted local secret file.
 
 ## Run API and Web
 
@@ -96,6 +96,24 @@ For local development, replace the database name/config with the local Wrangler 
 - `bot` — optional `bot` profile; uses a development Discord Bot token and calls API at `http://api:8787`.
 
 Compose health checks use Node.js `fetch` and do not log Discord message content, Conversation Context content, prompt body, response text, attachment URLs, credentials, or provider raw bodies.
+
+## Local provider configuration
+
+Prefer the default fake provider for local development:
+
+```bash
+LLM_PROVIDER=fake
+```
+
+When real NVIDIA NIM testing is necessary, use uncommitted local values only:
+
+```bash
+LLM_PROVIDER=nvidia_nim
+NVIDIA_NIM_BEARER_TOKEN=
+NVIDIA_NIM_BASE_URL=https://integrate.api.nvidia.com/v1
+```
+
+`NVIDIA_NIM_BEARER_TOKEN` is NVIDIA NIM API key material. Do not store it in D1, logs, frontend state, Bot Worker runtime configuration, docs examples, fixtures, snapshots, committed `.env` files, or shared shell history.
 
 ## Quality gates
 

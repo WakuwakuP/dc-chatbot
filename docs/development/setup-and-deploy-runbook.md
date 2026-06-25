@@ -11,11 +11,11 @@
   - selected Conversation Context content
   - prompt body
   - response text
+  - NVIDIA NIM API key / bearer token
   - plaintext credential material
-  - ChatGPT credential history
   - attachment URLs / attachment bytes
   - provider raw request / response body
-- Bot Worker は D1、ChatGPT credential、provider backend に直接アクセスしません。必ず Cloudflare Access Service Token で `/api/v1/bot/*` を呼びます。
+- Bot Worker は D1、NVIDIA NIM API key / bearer token、provider backend に直接アクセスしません。必ず Cloudflare Access Service Token で `/api/v1/bot/*` を呼びます。
 - Owner human routes は `/api/v1/owner/*`、Bot service routes は `/api/v1/bot/*` です。
 
 ## 1. 開発環境立ち上げ
@@ -40,7 +40,7 @@ Windows PowerShell では次でも構いません。
 Copy-Item .env.example .env
 ```
 
-`.env` は local development 値だけにしてください。production Discord Bot token、ChatGPT Subscription Connection credential material、prompt body、response text、attachment URLs、provider raw bodies は入れないでください。
+`.env` は local development 値だけにしてください。production Discord Bot token、production NVIDIA NIM API key / bearer token、prompt body、response text、attachment URLs、provider raw bodies は入れないでください。real local NVIDIA NIM testing だけは、uncommitted local secret file に developer-only token を置いてください。
 
 ### 1.3 API / Web を起動する
 
@@ -178,6 +178,7 @@ Bot Worker の本番 hosting target は未決定です。`BOT_DEPLOY_TARGET` を
    - `CF_ACCESS_TEAM_DOMAIN`
    - `CF_ACCESS_AUD`
 8. Bot Worker 用 Cloudflare Access Service Token を作成し、client ID / client secret を控えます。
+9. NVIDIA NIM API key を provider account / secret manager で作成し、値そのものを repository、docs、issue、PR、log に貼らずに secret として扱います。
 
 ### 2.3 GitHub Actions Secrets / Variables を設定する
 
@@ -189,11 +190,10 @@ Required GitHub Actions Secrets:
 - `CLOUDFLARE_ACCOUNT_ID`
 - `CF_ACCESS_CLIENT_ID`
 - `CF_ACCESS_CLIENT_SECRET`
-- `CHATGPT_CREDENTIAL_MASTER_KEY_CURRENT`
+- `NVIDIA_NIM_BEARER_TOKEN`
 
 Optional GitHub Actions Secrets:
 
-- `CHATGPT_CREDENTIAL_MASTER_KEY_PREVIOUS` — master key rotation / rewrap 時だけ
 - `DISCORD_TOKEN` — future Bot target 用。現在の API/Web deploy では使いません
 
 Required GitHub Actions Variables:
@@ -204,10 +204,12 @@ Required GitHub Actions Variables:
 - `CLOUDFLARE_D1_DATABASE_ID`
 - `CLOUDFLARE_PAGES_PROJECT_NAME`
 - `VITE_API_BASE_URL`
+- `LLM_PROVIDER` — production では `nvidia_nim`
 
 Optional GitHub Actions Variables:
 
 - `API_WORKER_NAME` — 未設定なら `dc-chatbot-api`
+- `NVIDIA_NIM_BASE_URL` — default NVIDIA NIM endpoint を override する場合だけ
 - `API_SMOKE_URL` — 設定時のみ smoke check
 - `WEB_SMOKE_URL` — 設定時のみ smoke check
 - `BOT_DEPLOY_TARGET` — 現時点では未設定にしてください

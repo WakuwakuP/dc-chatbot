@@ -23,8 +23,8 @@ If implementation and ADRs conflict, do not silently follow the implementation. 
 
 Prefer the repository terms from `CONTEXT.md`, including:
 
-- ChatGPT Subscription Connection
-- Effective ChatGPT Subscription Connection
+- NVIDIA NIM API Key
+- Configured Provider Access
 - Discord User / Candidate Discord User / Allowed Discord User
 - Registered Member
 - Owner Discord User / Admin Owner / Regular Owner
@@ -33,26 +33,26 @@ Prefer the repository terms from `CONTEXT.md`, including:
 - Response Trigger / Response Decision
 - Automated Trigger Source
 
-Avoid terms such as API key, shared session, scraped browser session, customer, subscriber, public bot, memory, and transcript archive unless you are explicitly discussing forbidden terminology.
+Avoid terms such as shared session, scraped browser session, customer, subscriber, public bot, memory, transcript archive, ChatGPT Subscription Connection, and Effective ChatGPT Subscription Connection unless you are explicitly discussing superseded historical ADR context. Use `NVIDIA NIM API Key` rather than generic API key when referring to the production provider credential.
 
 ## 3. Place code by boundary
 
 Use these production boundaries:
 
-- `apps/api`: Cloudflare Workers API; owns authorization, D1 access, credential handling, provider calls, audit, retention cleanup, `/api/v1/owner/*`, and `/api/v1/bot/*`.
+- `apps/api`: Cloudflare Workers API; owns authorization, D1 access, NVIDIA NIM API key handling, provider calls, audit, retention cleanup, `/api/v1/owner/*`, and `/api/v1/bot/*`.
 - `apps/web`: Cloudflare Pages frontend; Vite + React + React Router + Tailwind CSS + shadcn/ui Owner Discord User management UI.
 - `apps/bot`: long-running Node.js + `discord.js` Bot Worker; owns Discord Gateway handling, transient Discord message fetches, typing/reply posting, and owner notification delivery when instructed by API.
 - `packages/shared`: DTO types and Valibot runtime schemas shared by API/Web/Bot.
 - `packages/domain`: runtime-independent domain types, state/policy helpers, role/status/decision helpers, and safe user-facing wording helpers.
 - `packages/data`: Drizzle ORM D1 table schema, hand-written forward-only migrations, targeted indexes, repository/data access helpers, and retention cleanup queries.
-- `packages/provider`: ChatGPT/Codex subscription backend adapter, provider-specific protocol, token handling, response generation, vision-capable generation, and safe error mapping.
+- `packages/provider`: NVIDIA NIM provider backend adapter, provider-specific protocol, token handling, response generation, vision-capable generation, and safe error mapping.
 
 `apps/api-spike` is compatibility/reference material only. You may consult it for Drizzle + D1 behavior and D1 transaction risks, but do not copy its structure as production architecture or move production responsibilities into it.
 
 ## 4. Respect runtime and security boundaries
 
 - Bot Worker must not access D1 directly.
-- Bot Worker must not hold, decrypt, refresh, or log ChatGPT credential material.
+- Bot Worker must not hold, decrypt, refresh, or log NVIDIA NIM API key / bearer token material.
 - Bot Worker must not call the provider backend directly.
 - Bot Worker calls `/api/v1/bot/*` through Cloudflare Access Service Token service identity.
 - Owner human routes live under `/api/v1/owner/*` and validate Cloudflare Access user identity plus Owner role.
@@ -69,8 +69,9 @@ Do not store or log the following in D1, structured logs, request audit, provide
 - selected Conversation Context content
 - prompt body
 - response text
+- NVIDIA NIM API key
+- NVIDIA NIM bearer token
 - plaintext credential material
-- ChatGPT credential history
 - attachment URLs
 - attachment bytes
 - provider raw request / response body
@@ -83,7 +84,7 @@ Use metadata-only structured logs and audits. Safe examples include IDs, actor t
 - Put environment-independent business rules in `packages/domain`; keep Cloudflare bindings, Discord clients, D1 bindings, and provider protocol out of domain code.
 - Put D1 schema and queries in `packages/data`; use Discord snowflake IDs as `TEXT`, general audit/event/setting IDs as ULID text, and timestamps as ISO 8601 UTC text. Migrations are forward-only; prefer forward-fix migrations over down migration design.
 - Keep authorization-sensitive mutations explicit in domain/API/repository helpers; do not hide policy behavior in implicit data-layer runtime magic.
-- Put provider compatibility, credential lifecycle interactions, token refresh details, and raw error translation behind `packages/provider` interfaces.
+- Put provider compatibility, NVIDIA NIM token handling, and raw error translation behind `packages/provider` interfaces.
 - In `apps/api`, enforce route-level identity and role boundaries before mutation or provider work. Store only metadata audits.
 - In `apps/bot`, handle Discord events and transient content only long enough to call API and post Discord replies. Ignore automated bot/webhook messages by default unless they are configured Automated Trigger Sources.
 - In `apps/web`, use existing shadcn/ui components and semantic tokens/variants. Do not keep sensitive content in React state or browser storage.

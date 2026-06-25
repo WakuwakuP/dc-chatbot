@@ -4,15 +4,14 @@ Do not commit secret values. Configure these names in GitHub Actions and Cloudfl
 
 ## GitHub Actions Secrets
 
-| Name                                     | Used by                        | Purpose                                                                                                                                                                   |
-| ---------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CLOUDFLARE_API_TOKEN`                   | Deploy workflow                | Cloudflare API token with permission to deploy Workers/Pages, manage Worker secrets, and apply D1 migrations.                                                             |
-| `CLOUDFLARE_ACCOUNT_ID`                  | Deploy workflow                | Cloudflare account ID. Treat as deployment-sensitive metadata.                                                                                                            |
-| `CF_ACCESS_CLIENT_ID`                    | API Worker secret, Bot runtime | Cloudflare Access Service Token client ID used by the Bot Worker for `/api/v1/bot/*`.                                                                                     |
-| `CF_ACCESS_CLIENT_SECRET`                | API Worker secret, Bot runtime | Cloudflare Access Service Token client secret used by the Bot Worker for `/api/v1/bot/*`.                                                                                 |
-| `CHATGPT_CREDENTIAL_MASTER_KEY_CURRENT`  | API Worker secret              | Current base64 or base64url encoded 32-byte AES-GCM master key used to wrap per-connection data encryption keys for ChatGPT Subscription Connection credential envelopes. |
-| `CHATGPT_CREDENTIAL_MASTER_KEY_PREVIOUS` | API Worker secret              | Optional previous master wrapping key reserved for rotation/decryption workflows. Remove after all active data encryption keys are rewrapped.                             |
-| `DISCORD_TOKEN`                          | Future Bot target only         | Production Discord Bot token. Do not expose to local Compose or API/Web deployments.                                                                                      |
+| Name                      | Used by                        | Purpose                                                                                                               |
+| ------------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| `CLOUDFLARE_API_TOKEN`    | Deploy workflow                | Cloudflare API token with permission to deploy Workers/Pages, manage Worker secrets, and apply D1 migrations.         |
+| `CLOUDFLARE_ACCOUNT_ID`   | Deploy workflow                | Cloudflare account ID. Treat as deployment-sensitive metadata.                                                        |
+| `CF_ACCESS_CLIENT_ID`     | API Worker secret, Bot runtime | Cloudflare Access Service Token client ID used by the Bot Worker for `/api/v1/bot/*`.                                 |
+| `CF_ACCESS_CLIENT_SECRET` | API Worker secret, Bot runtime | Cloudflare Access Service Token client secret used by the Bot Worker for `/api/v1/bot/*`.                             |
+| `NVIDIA_NIM_BEARER_TOKEN` | API Worker secret              | NVIDIA NIM API key value used as the provider `Authorization: Bearer ...` token. Never expose it outside API runtime. |
+| `DISCORD_TOKEN`           | Future Bot target only         | Production Discord Bot token. Do not expose to local Compose or API/Web deployments.                                  |
 
 ## GitHub Actions Variables
 
@@ -25,6 +24,8 @@ Do not commit secret values. Configure these names in GitHub Actions and Cloudfl
 | `CLOUDFLARE_D1_DATABASE_ID`     | API deploy              | Production D1 database ID patched into `apps/api/wrangler.toml` during deployment.                             |
 | `CLOUDFLARE_PAGES_PROJECT_NAME` | Web deploy              | Cloudflare Pages project name for `apps/web`.                                                                  |
 | `VITE_API_BASE_URL`             | Web build               | Public API origin used by the Owner UI build.                                                                  |
+| `LLM_PROVIDER`                  | API deploy/API Worker   | Set to `nvidia_nim` for production provider calls. Local development may use `fake`.                           |
+| `NVIDIA_NIM_BASE_URL`           | API deploy/API Worker   | Optional override for the NVIDIA NIM OpenAI-compatible base URL. Omit to use the provider adapter default.     |
 | `API_SMOKE_URL`                 | Smoke check             | Public or Access-compatible API origin. The workflow checks `${API_SMOKE_URL}/health`.                         |
 | `WEB_SMOKE_URL`                 | Smoke check             | Web origin checked after Pages deploy.                                                                         |
 | `BOT_DEPLOY_TARGET`             | Bot placeholder         | Leave unset until a concrete Bot hosting target is documented and implemented.                                 |
@@ -47,59 +48,35 @@ Create a Cloudflare Access Service Token for the Bot Worker. Use its client ID a
 1. API Worker secrets: `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET`.
 2. Bot runtime secrets on the future Bot hosting target.
 
-The Bot Worker must call `/api/v1/bot/*` with Cloudflare Access Service Token headers. It must not access D1, ChatGPT credential material, or provider backends directly.
+The Bot Worker must call `/api/v1/bot/*` with Cloudflare Access Service Token headers. It must not access D1, NVIDIA NIM API key material, bearer tokens, or provider backends directly.
 
-## ChatGPT Subscription Connection credential encryption
+## NVIDIA NIM provider credential
 
-`CHATGPT_CREDENTIAL_MASTER_KEY_CURRENT` is required before completing a ChatGPT Subscription Connection flow. The API Worker decodes this secret as a 32-byte AES-GCM master wrapping key from standard base64 or base64url. For each completed ChatGPT Subscription Connection, the API Worker generates a fresh random 32-byte data encryption key (DEK), encrypts the provider-returned credential material with that DEK, then wraps the DEK with the current master key.
+The production provider credential is the NVIDIA NIM API key. The API Worker reads it from `NVIDIA_NIM_BEARER_TOKEN` and passes it to the provider adapter as bearer-token material for NVIDIA NIM requests.
 
-D1 stores only a JSON encryption envelope with safe metadata, IVs, credential ciphertext, and wrapped DEK ciphertext:
+Configure the token as a Cloudflare Worker secret and, where deployment automation uploads Worker secrets, as a GitHub Actions secret. Do not configure it as a public Pages variable, Wrangler plain text `vars` entry, `.env` value committed to the repository, D1 row, frontend state, Bot runtime value, test fixture, docs example, issue, PR comment, or log output.
 
-```json
-{
-  "v": 2,
-  "credentialAlg": "AES-GCM",
-  "keyWrapAlg": "AES-GCM",
-  "masterKeyId": "current",
-  "additionalAuthenticatedData": {
-    "envelopeType": "chatgpt_subscription_connection_credential",
-    "envelopeVersion": 2,
-    "credentialAlg": "AES-GCM",
-    "keyWrapAlg": "AES-GCM",
-    "masterKeyId": "current",
-    "ownerDiscordUserId": "...",
-    "connectionFlowStateId": "...",
-    "connectionId": "..."
-  },
-  "credentialIv": "...",
-  "credentialCiphertext": "...",
-  "wrappedDataKeyIv": "...",
-  "wrappedDataKeyCiphertext": "..."
-}
-```
+`LLM_PROVIDER=nvidia_nim` selects the NVIDIA NIM provider. `NVIDIA_NIM_BASE_URL` is optional and should remain unset unless an operator intentionally needs to override the default OpenAI-compatible NVIDIA NIM endpoint. The base URL is not credential material, but treat it as deployment-sensitive configuration.
 
-The IV and ciphertext fields are base64 encoded. The Owner Discord User ID, connection flow state ID, and connection ID are safe metadata and are also used as AES-GCM additional authenticated data. Provider-returned credential material and plaintext DEKs are never stored in D1. If the master key is missing, has the wrong length, or encryption/wrapping fails, the API returns `503 credential_encryption_unavailable` and does not complete persistence.
+If `NVIDIA_NIM_BEARER_TOKEN` is missing, empty, malformed, revoked, or rejected by the provider, the API must fail with a safe provider/configuration error category. It must not return or log the token, provider raw request body, provider raw response body, prompt body, selected Conversation Context content, or response text.
 
-Generate the key outside the repository with a cryptographically secure random source. It must decode to exactly 32 bytes. For example, use an operator workstation or secret manager to generate 32 random bytes and base64 encode the bytes; do not paste generated values into docs, commits, tickets, or logs.
+## Rotation and revocation
 
-## Master encryption key rotation caveat
+Rotate the NVIDIA NIM API key through the provider account and Cloudflare Worker secret flow:
 
-New credential envelopes encrypt credential material with a per-connection DEK, wrap that DEK with `CHATGPT_CREDENTIAL_MASTER_KEY_CURRENT`, and record `masterKeyId: "current"`. The optional `CHATGPT_CREDENTIAL_MASTER_KEY_PREVIOUS` secret is reserved for a rotation/rewrap workflow, but this implementation does not yet decrypt or rewrap existing DEKs automatically.
+1. Create a replacement NVIDIA NIM API key outside the repository.
+2. Upload it as the new `NVIDIA_NIM_BEARER_TOKEN` Worker secret.
+3. Deploy or restart the API Worker as required by the hosting flow.
+4. Verify metadata-only health/provider checks without sending sensitive prompt or response content to logs.
+5. Revoke the old NVIDIA NIM API key in the provider account.
+6. Confirm Cloudflare/GitHub logs contain only secret names and safe status metadata.
 
-Manual rotation must therefore be planned before replacing the current key:
-
-1. Generate a new high-entropy 32-byte master key outside the repository and encode it as base64 or base64url.
-2. Keep the existing current key available as `CHATGPT_CREDENTIAL_MASTER_KEY_PREVIOUS` only while a rewrap workflow can still decrypt envelopes encrypted by the old key.
-3. Set the new key as `CHATGPT_CREDENTIAL_MASTER_KEY_CURRENT`.
-4. Deploy the API Worker.
-5. Rewrap active ChatGPT Subscription Connection DEKs through a metadata-only maintenance job before removing the previous key.
-6. Verify no active envelope requires the previous master key.
-7. Remove `CHATGPT_CREDENTIAL_MASTER_KEY_PREVIOUS` from Cloudflare and GitHub Actions.
-
-Do not print keys in workflow logs. Do not place real key material in `.env`, docs, snapshots, D1, frontend state, or Bot runtime logs.
+No D1 credential rewrap or per-user credential migration is required because the NVIDIA NIM API key is not stored in D1.
 
 ## Local development safety
 
 Local development may use fake Cloudflare Access Service Token values and `ALLOW_LOCAL_AUTH_BYPASS=true` inside Docker Compose. Production must not.
 
 Local Bot development must use a dedicated development Discord Application/Bot token via `DISCORD_DEV_TOKEN`; `docker-compose.yml` intentionally passes `DISCORD_TOKEN` as an empty value so a production token from the host shell is not forwarded into the local container.
+
+For local provider work, prefer `LLM_PROVIDER=fake`. If testing real NVIDIA NIM locally is necessary, place `NVIDIA_NIM_BEARER_TOKEN` only in an uncommitted local secret store such as a developer-only `.env` file, never in docs, fixtures, snapshots, or shell history that may be shared.

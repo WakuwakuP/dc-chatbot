@@ -1,8 +1,8 @@
 # dc-chatbot
 
-`dc-chatbot` は、Discord の Private Bot から ChatGPT/Codex subscription-backed backend を利用するためのアプリケーションです。
+`dc-chatbot` は、Discord の Private Bot から NVIDIA NIM provider backend を利用するためのアプリケーションです。
 
-Owner Discord User は自分の ChatGPT Subscription Connection を接続し、Registered Member は自分に割り当てられた Owner Discord User の ChatGPT Subscription Connection を使って bot を利用します。
+Owner Discord User は Private Bot の利用者と設定を管理し、Registered Member は owner-controlled authorization と API Worker に設定された NVIDIA NIM API key による Configured Provider Access を使って bot を利用します。Discord users は per-user provider credential を接続しません。
 
 ## 設計ドキュメント
 
@@ -31,7 +31,7 @@ Owner Discord User は自分の ChatGPT Subscription Connection を接続し、R
 │   ├── shared/                 # API/Web/Bot で共有する DTO と Valibot schemas
 │   ├── domain/                 # ドメイン型、用語、状態遷移、policy helper
 │   ├── data/                   # Drizzle ORM + D1 schema、hand-written forward-only migrations、repository helper
-│   ├── provider/               # ChatGPT/Codex subscription backend adapter
+│   ├── provider/               # NVIDIA NIM provider backend adapter
 │   └── config/                 # 共通 tsconfig / lint / format 設定が必要になれば配置
 ├── docs/
 │   └── adr/                    # Architecture Decision Records
@@ -48,7 +48,7 @@ Owner Discord User は自分の ChatGPT Subscription Connection を接続し、R
 
 ### `apps/api` — Cloudflare Workers API
 
-API は application boundary です。Elysia を Cloudflare Workers 互換で使い、D1、credential handling、provider calls、authorization、audit、retention cleanup をここに集約します。
+API は application boundary です。Elysia を Cloudflare Workers 互換で使い、D1、NVIDIA NIM API key handling、provider calls、authorization、audit、retention cleanup をここに集約します。
 
 主な責務:
 
@@ -57,8 +57,8 @@ API は application boundary です。Elysia を Cloudflare Workers 互換で使
 - Bot Worker service identity の検証
 - `/api/v1/owner/*` と `/api/v1/bot/*` の提供
 - D1 への operational state / metadata 保存
-- ChatGPT Subscription Connection credential の暗号化・復号・refresh
-- Provider adapter を通した ChatGPT/Codex backend 呼び出し
+- NVIDIA NIM API key / bearer token の secret 参照
+- Provider adapter を通した NVIDIA NIM backend 呼び出し
 - request audit / provider audit / setting audit の metadata-only 記録
 - scheduled cleanup による retention enforcement
 
@@ -74,14 +74,14 @@ Web は Vite + React + React Router + Tailwind CSS + shadcn/ui を使う Owner D
 
 主な画面領域:
 
-- Owner / connection status
+- Owner / provider status
 - Registered Member management
 - Candidate Discord User promotion
 - Usage / request audit metadata graph
 - Model settings
 - Prompt settings metadata
 - Automated Trigger Source settings
-- reconnect reminder / owner notification 操作
+- owner notification 操作
 
 Web 実装ルール:
 
@@ -107,7 +107,7 @@ Bot Worker は Discord Gateway に接続する長寿命 Node.js process です�
 Bot 実装ルール:
 
 - D1 に直接アクセスしません。
-- ChatGPT credential を保持・復号・refresh しません。
+- NVIDIA NIM API key / bearer token を保持・復号・refresh しません。
 - Provider backend を直接呼びません。
 - Cloudflare Access Service Token で `/api/v1/bot/*` を呼び出します。
 - local development では production Bot token を使わず、dev guild / DM allowlist を必ず使います。
@@ -131,7 +131,7 @@ Framework-specific client generation に依存せず、Cloudflare Workers bundle
 
 主な候補:
 
-- Effective ChatGPT Subscription Connection resolution
+- Configured Provider Access availability helper
 - Owner role / Regular Owner scope 判定
 - Registered Member / Candidate Discord User status helper
 - Response Trigger / Response Decision の安全な enum
@@ -161,20 +161,20 @@ D1 方針:
 - lifecycle ごとに table を分離
 - production migration は forward-only
 
-### `packages/provider` — ChatGPT/Codex provider adapter
+### `packages/provider` — NVIDIA NIM provider adapter
 
-ChatGPT/Codex subscription-backed backend との境界です。
+NVIDIA NIM provider backend との境界です。
 
 主な責務:
 
-- connection / refresh / revoke / needsReconnect mapping
+- NVIDIA NIM chat completions protocol
 - response generation
 - vision-capable generation
 - context selection / response decision provider call
 - provider raw error から safe error category への変換
 - provider-specific protocol と token handling の隔離
 
-Provider adapter の外へ raw request / response body や credential details を漏らさないでください。
+Provider adapter の外へ raw request / response body や NVIDIA NIM API key / bearer token details を漏らさないでください。
 
 ## Runtime 境界
 
@@ -191,7 +191,7 @@ flowchart TD
     api --> data[packages/data]
     api --> d1[(Cloudflare D1)]
     api --> provider[packages/provider]
-    provider --> backend[ChatGPT/Codex subscription backend]
+    provider --> backend[NVIDIA NIM backend]
 
     api --> shared[packages/shared]
     web --> shared
@@ -227,7 +227,7 @@ sequenceDiagram
     participant B as apps/bot
     participant A as apps/api
     participant P as packages/provider
-    participant C as ChatGPT/Codex backend
+    participant C as NVIDIA NIM backend
 
     D->>B: Message event
     B->>A: /api/v1/bot/messages/intake
@@ -266,8 +266,9 @@ Message content と Conversation Context は必要時に transient に処理し�
 - selected Conversation Context content
 - prompt body
 - response text
+- NVIDIA NIM API key
+- NVIDIA NIM bearer token
 - plaintext credential material
-- ChatGPT credential history
 - attachment URLs
 - attachment bytes
 - provider raw request / response body
@@ -280,7 +281,7 @@ Message content と Conversation Context は必要時に transient に処理し�
 4. `apps/api` に owner/bot route の auth boundary と health endpoint を実装
 5. `apps/bot` に intake 呼び出しと dev safety rails を実装
 6. `apps/web` に Owner 管理 UI の最小 shell を実装
-7. Provider adapter と credential lifecycle を API 内側から接続
+7. Provider adapter と NVIDIA NIM secret handling を API 内側から接続
 8. audit metadata と scheduled cleanup を追加
 
 ## Tooling

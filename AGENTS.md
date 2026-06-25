@@ -16,16 +16,15 @@ ADR が実装と矛盾している場合は、勝手に実装へ合わせて設�
 
 ## プロジェクト概要
 
-`dc-chatbot` は Private Bot です。Discord users は自分の、または割り当てられた Owner Discord User の ChatGPT Subscription Connection を使って bot 経由で ChatGPT/Codex backend を利用します。
+`dc-chatbot` は Private Bot です。Discord users は owner-controlled authorization によって bot を利用し、API Worker が NVIDIA NIM API key を使って NVIDIA NIM provider backend を呼び出します。
 
 主要コンポーネント:
 
-- Cloud
-flare Workers API: authorization、D1、credential handling、provider calls、bot-facing endpoints
+- Cloudflare Workers API: authorization、D1、NVIDIA NIM API key handling、provider calls、bot-facing endpoints
 - Cloudflare Pages frontend: Owner Discord User 向け management UI
 - Bot Worker: `discord.js` を使う長寿命 Node.js process
 - Cloudflare D1: operational state と metadata storage
-- Provider adapter: ChatGPT/Codex subscription backend との境界
+- Provider adapter: NVIDIA NIM provider backend との境界
 
 `apps/api-spike` は compatibility spike です。本実装の責務分離や directory structure の中心として扱わないでください。
 
@@ -40,26 +39,26 @@ apps/bot/        # Node.js + discord.js Bot Worker。Discord Gateway と返信�
 packages/shared/ # DTO types と Valibot runtime schemas
 packages/domain/ # runtime 非依存の domain types / state / policy helper
 packages/data/   # Drizzle ORM + D1 schema、hand-written forward-only migrations、repository/data access helper
-packages/provider/ # ChatGPT/Codex subscription backend adapter
+packages/provider/ # NVIDIA NIM provider backend adapter
 ```
 
 配置ルール:
 
-- API route、D1 access、credential handling、provider calls は `apps/api` 側に置きます。
+- API route、D1 access、NVIDIA NIM API key handling、provider calls は `apps/api` 側に置きます。
 - Discord Gateway client と Discord message fetch/post は `apps/bot` 側に置きます。
 - Owner UI は `apps/web` 側に置き、Vite + React + React Router + Tailwind CSS + shadcn/ui を使います。
 - API/Web/Bot 間 DTO は `packages/shared` に置き、Valibot schema と TypeScript type を共有します。
 - domain-level helper は `packages/domain` に置き、Cloudflare/Discord/provider runtime に依存させません。
 - Drizzle ORM table schema、D1 migrations、query/repository helper は `packages/data` に置きます。
-- ChatGPT/Codex の provider-specific protocol、token handling、safe error mapping は `packages/provider` に閉じ込めます。
+- NVIDIA NIM の provider-specific protocol、token handling、safe error mapping は `packages/provider` に閉じ込めます。
 - `apps/api-spike` は検証・参考用です。本実装の都合で spike を無理に整備しないでください。
 
 ## ドメイン用語
 
 `CONTEXT.md` の用語を使ってください。特に以下の表現を優先します。
 
-- ChatGPT Subscription Connection
-- Effective ChatGPT Subscription Connection
+- NVIDIA NIM API Key
+- Configured Provider Access
 - Discord User
 - Candidate Discord User
 - Registered Member
@@ -72,7 +71,7 @@ packages/provider/ # ChatGPT/Codex subscription backend adapter
 
 避ける表現の例:
 
-- API key
+- generic API key
 - shared session
 - scraped browser session
 - customer
@@ -88,20 +87,21 @@ packages/provider/ # ChatGPT/Codex subscription backend adapter
 - selected Conversation Context content
 - prompt body
 - response text
+- NVIDIA NIM API key
+- NVIDIA NIM bearer token
 - plaintext credential material
-- ChatGPT credential history
 - attachment URLs
 - attachment bytes
 - provider raw request / response body
 
-ログは metadata-only の structured log にしてください。Error object や stack trace をそのまま出力して、credential・message・prompt・response が混入しないようにしてください。
+ログは metadata-only の structured log にしてください。Error object や stack trace をそのまま出力して、NVIDIA NIM API key / bearer token・message・prompt・response が混入しないようにしてください。
 
 保存してよいものは、原則として安全な metadata のみです。例: IDs、actor type、event type、status/error category、model、duration、request ID、provider call ID、件数、サイズ、retention cleanup 対象日時。
 
 ## アーキテクチャ上の境界
 
 - Bot Worker は D1 に直接アクセスしません。
-- Bot Worker は ChatGPT credential を保持・復号・refresh しません。
+- Bot Worker は NVIDIA NIM API key / bearer token を保持・復号・refresh しません。
 - Bot Worker は provider backend を直接呼びません。
 - Bot Worker は Cloudflare Access Service Token で `/api/v1/bot/*` を呼び出します。
 - Owner human routes は `/api/v1/owner/*` に置き、Cloudflare Access user identity と owner role を検証します。

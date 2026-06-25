@@ -4,6 +4,10 @@
 
 今後の `dc-chatbot` 実装作業で、AI agent が毎回同じ前提を確認し、ドメイン用語・ADR・runtime 境界・security/privacy 制約を外さずに作業できるよう、project-local Zed agent skill を追加する。
 
+## 2026-06 NIM architecture update
+
+ADR 0059 により、production provider credential は NVIDIA NIM API key になった。skill は `NVIDIA NIM API Key` と `Configured Provider Access` を正準用語として扱い、ChatGPT Subscription Connection / Effective ChatGPT Subscription Connection は superseded historical ADR context を説明する場合だけ使う。
+
 ## スコープ判断
 
 この skill は project-local scope とする。
@@ -40,7 +44,7 @@ skill 名は `dc-chatbot-implementation` とした。
 - `AGENTS.md`
   - project-local rules、security/privacy 絶対ルール、directory boundaries、Bot/API/provider 境界を反映。
 - `CONTEXT.md`
-  - ChatGPT Subscription Connection、Effective ChatGPT Subscription Connection、Discord User、Candidate Discord User、Registered Member、Owner Discord User、Private Bot、Conversation Context、Response Trigger / Response Decision、Automated Trigger Source などの正準用語を反映。
+  - NVIDIA NIM API Key、Configured Provider Access、Discord User、Candidate Discord User、Registered Member、Owner Discord User、Private Bot、Conversation Context、Response Trigger / Response Decision、Automated Trigger Source などの正準用語を反映。
 - `README.md`
   - target directory structure、component responsibility、runtime boundary、保存してよいもの / いけないもの、tooling と基本 check 方針を反映。
 - `docs/adr/README.md`
@@ -55,8 +59,8 @@ skill 名は `dc-chatbot-implementation` とした。
   - structured metadata log と sensitive data logging 禁止を反映。
 - `docs/adr/0049-share-dto-schemas-with-valibot.md`
   - DTO types と Valibot schemas を `packages/shared` に置く方針を反映。
-- `docs/adr/0052-use-provider-adapter-for-chatgpt-subscription-backend.md`
-  - provider-specific protocol、token handling、safe error mapping を `packages/provider` に閉じ込める方針を反映。
+- `docs/adr/0052-use-provider-adapter-for-chatgpt-subscription-backend.md`, `docs/adr/0059-use-nvidia-nim-api-key-as-provider-credential.md`
+  - provider-specific protocol、NVIDIA NIM token handling、safe error mapping を `packages/provider` に閉じ込める方針を反映。
 - `docs/adr/0056-use-drizzle-for-d1-data-layer.md`
   - production data layer は Drizzle ORM + hand-written forward-only D1 migrations とする方針を反映。
 - `docs/adr/0057-use-vite-react-router-tailwind-shadcn-for-web-frontend.md`

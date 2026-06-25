@@ -31,12 +31,13 @@ jobs:
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
           CF_ACCESS_TEAM_DOMAIN: ${{ vars.CF_ACCESS_TEAM_DOMAIN }}
-          CHATGPT_CREDENTIAL_MASTER_KEY_CURRENT: ${{ secrets.CHATGPT_CREDENTIAL_MASTER_KEY_CURRENT }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_D1_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_DATABASE_ID }}
           CLOUDFLARE_D1_DATABASE_NAME: ${{ vars.CLOUDFLARE_D1_DATABASE_NAME }}
           CLOUDFLARE_PAGES_PROJECT_NAME: ${{ vars.CLOUDFLARE_PAGES_PROJECT_NAME }}
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
+          NVIDIA_NIM_BEARER_TOKEN: ${{ secrets.NVIDIA_NIM_BEARER_TOKEN }}
           VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
           WEB_SMOKE_URL: ${{ vars.WEB_SMOKE_URL }}
         run: |
@@ -64,14 +65,20 @@ jobs:
           require_secret CLOUDFLARE_ACCOUNT_ID "$CLOUDFLARE_ACCOUNT_ID"
           require_secret CF_ACCESS_CLIENT_ID "$CF_ACCESS_CLIENT_ID"
           require_secret CF_ACCESS_CLIENT_SECRET "$CF_ACCESS_CLIENT_SECRET"
-          require_secret CHATGPT_CREDENTIAL_MASTER_KEY_CURRENT "$CHATGPT_CREDENTIAL_MASTER_KEY_CURRENT"
+          require_secret NVIDIA_NIM_BEARER_TOKEN "$NVIDIA_NIM_BEARER_TOKEN"
 
           require_var CF_ACCESS_AUD "$CF_ACCESS_AUD"
           require_var CF_ACCESS_TEAM_DOMAIN "$CF_ACCESS_TEAM_DOMAIN"
           require_var CLOUDFLARE_D1_DATABASE_NAME "$CLOUDFLARE_D1_DATABASE_NAME"
           require_var CLOUDFLARE_D1_DATABASE_ID "$CLOUDFLARE_D1_DATABASE_ID"
           require_var CLOUDFLARE_PAGES_PROJECT_NAME "$CLOUDFLARE_PAGES_PROJECT_NAME"
+          require_var LLM_PROVIDER "$LLM_PROVIDER"
           require_var VITE_API_BASE_URL "$VITE_API_BASE_URL"
+
+          if [ "$LLM_PROVIDER" != "nvidia_nim" ]; then
+            echo "::error::Production deploy requires LLM_PROVIDER=nvidia_nim."
+            missing=1
+          fi
 
           if grep -Eq 'ALLOW_LOCAL_AUTH_BYPASS[[:space:]]*=[[:space:]]*"true"' apps/api/wrangler.toml; then
             echo "::error::Production Wrangler config must not enable ALLOW_LOCAL_AUTH_BYPASS."
@@ -189,6 +196,8 @@ jobs:
           CF_ACCESS_TEAM_DOMAIN: ${{ vars.CF_ACCESS_TEAM_DOMAIN }}
           CLOUDFLARE_D1_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_DATABASE_ID }}
           CLOUDFLARE_D1_DATABASE_NAME: ${{ vars.CLOUDFLARE_D1_DATABASE_NAME }}
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
+          NVIDIA_NIM_BASE_URL: ${{ vars.NVIDIA_NIM_BASE_URL }}
         run: |
           python <<'PY'
           import json
@@ -203,6 +212,9 @@ jobs:
           text = text.replace('database_id = "00000000-0000-0000-0000-000000000000"', f'database_id = "{os.environ["CLOUDFLARE_D1_DATABASE_ID"]}"')
           text = text.replace('CF_ACCESS_TEAM_DOMAIN = "replace-with-team.cloudflareaccess.com"', f'CF_ACCESS_TEAM_DOMAIN = {json.dumps(os.environ["CF_ACCESS_TEAM_DOMAIN"])}')
           text = text.replace('CF_ACCESS_AUD = "replace-with-access-application-aud"', f'CF_ACCESS_AUD = {json.dumps(os.environ["CF_ACCESS_AUD"])}')
+          text = text.replace('LLM_PROVIDER = "fake"', f'LLM_PROVIDER = {json.dumps(os.environ["LLM_PROVIDER"])}')
+          if os.environ.get("NVIDIA_NIM_BASE_URL"):
+              text = text.replace('# NVIDIA_NIM_BASE_URL = "https://integrate.api.nvidia.com/v1"', f'NVIDIA_NIM_BASE_URL = {json.dumps(os.environ["NVIDIA_NIM_BASE_URL"])}')
           config.write_text(text, encoding="utf-8")
           PY
 
@@ -216,17 +228,13 @@ jobs:
         env:
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
-          CHATGPT_CREDENTIAL_MASTER_KEY_CURRENT: ${{ secrets.CHATGPT_CREDENTIAL_MASTER_KEY_CURRENT }}
-          CHATGPT_CREDENTIAL_MASTER_KEY_PREVIOUS: ${{ secrets.CHATGPT_CREDENTIAL_MASTER_KEY_PREVIOUS }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          NVIDIA_NIM_BEARER_TOKEN: ${{ secrets.NVIDIA_NIM_BEARER_TOKEN }}
         run: |
           printf '%s' "$CF_ACCESS_CLIENT_ID" | pnpm dlx wrangler@${{ env.WRANGLER_VERSION }} secret put CF_ACCESS_CLIENT_ID --config apps/api/wrangler.toml
           printf '%s' "$CF_ACCESS_CLIENT_SECRET" | pnpm dlx wrangler@${{ env.WRANGLER_VERSION }} secret put CF_ACCESS_CLIENT_SECRET --config apps/api/wrangler.toml
-          printf '%s' "$CHATGPT_CREDENTIAL_MASTER_KEY_CURRENT" | pnpm dlx wrangler@${{ env.WRANGLER_VERSION }} secret put CHATGPT_CREDENTIAL_MASTER_KEY_CURRENT --config apps/api/wrangler.toml
-          if [ -n "$CHATGPT_CREDENTIAL_MASTER_KEY_PREVIOUS" ]; then
-            printf '%s' "$CHATGPT_CREDENTIAL_MASTER_KEY_PREVIOUS" | pnpm dlx wrangler@${{ env.WRANGLER_VERSION }} secret put CHATGPT_CREDENTIAL_MASTER_KEY_PREVIOUS --config apps/api/wrangler.toml
-          fi
+          printf '%s' "$NVIDIA_NIM_BEARER_TOKEN" | pnpm dlx wrangler@${{ env.WRANGLER_VERSION }} secret put NVIDIA_NIM_BEARER_TOKEN --config apps/api/wrangler.toml
 
   deploy_web:
     name: Deploy Web Pages

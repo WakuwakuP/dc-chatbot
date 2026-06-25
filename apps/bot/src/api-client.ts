@@ -1,9 +1,13 @@
 import {
   BotMessageIntakeResponseSchema,
+  BotOwnerNotificationDeliveryListResponseSchema,
+  BotOwnerNotificationDeliveryUpdateRequestSchema,
   BotRespondResponseSchema,
   HealthResponseSchema,
   type BotMessageIntakeRequest,
   type BotMessageIntakeResponse,
+  type BotOwnerNotificationDeliveryListResponse,
+  type BotOwnerNotificationDeliveryUpdateRequest,
   type BotRespondRequest,
   type BotRespondResponse,
   parseJson,
@@ -31,6 +35,12 @@ export type BotApiClient = {
     request: BotMessageIntakeRequest,
   ): Promise<BotMessageIntakeResponse>;
   requestResponse(request: BotRespondRequest): Promise<BotRespondResponse>;
+  fetchPendingOwnerNotifications(
+    limit?: number,
+  ): Promise<BotOwnerNotificationDeliveryListResponse>;
+  updateOwnerNotificationDelivery(
+    request: BotOwnerNotificationDeliveryUpdateRequest,
+  ): Promise<void>;
 };
 
 type RequestMethod = "GET" | "POST";
@@ -163,12 +173,32 @@ export function createBotApiClient(options: BotApiClientOptions): BotApiClient {
         }),
       );
     },
+    async fetchPendingOwnerNotifications(limit = 10) {
+      const requestedLimit = Number(limit);
+      const searchParams = new URLSearchParams({
+        limit: String(
+          Number.isFinite(requestedLimit)
+            ? Math.max(1, Math.min(50, Math.trunc(requestedLimit)))
+            : 10,
+        ),
+      });
+      return parseJson(
+        BotOwnerNotificationDeliveryListResponseSchema,
+        await requestJson(
+          `/api/v1/bot/owner-notifications/pending?${searchParams.toString()}`,
+          { method: "GET" },
+        ),
+      );
+    },
+    async updateOwnerNotificationDelivery(request) {
+      parseJson(BotOwnerNotificationDeliveryUpdateRequestSchema, request);
+      await requestJson("/api/v1/bot/owner-notifications/delivery-status", {
+        method: "POST",
+        body: request,
+      });
+    },
   };
 }
-
-// TODO: Add owner notification delivery endpoints here when the shared Bot/API
-// contract defines delivery instructions and status update DTOs. Until then the
-// Bot Worker must not invent a cross-boundary owner notification payload locally.
 
 async function fetchWithTimeout(
   fetchImpl: typeof globalThis.fetch,

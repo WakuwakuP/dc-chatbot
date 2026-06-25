@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { BotApiRequestError, createBotApiClient } from "../src/index";
+import {
+  BotApiRequestError,
+  createBotApiClient,
+  type BotApiClient,
+} from "../src/index";
 
 const INTAKE_RESPONSE = {
   requestId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
@@ -103,5 +107,83 @@ describe("createBotApiClient", () => {
       isTransient: false,
     } satisfies Partial<BotApiRequestError>);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("fetches pending Owner Notifications for delivery", async () => {
+    const fetchMock = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(
+        createResponse({
+          ownerNotifications: [
+            {
+              ownerNotificationId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+              notificationOwnerDiscordUserId: "123",
+              candidateDiscordUserId: "456",
+              requestId: "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+              triggerKind: "dm",
+              status: "delivery_requested",
+              safeErrorCategory: null,
+              createdAt: "2026-06-20T00:00:00.000Z",
+              updatedAt: "2026-06-20T00:00:01.000Z",
+            },
+          ],
+        }),
+      );
+
+    const client = createClient(fetchMock);
+    await expect(client.fetchPendingOwnerNotifications(5)).resolves.toEqual({
+      ownerNotifications: [
+        expect.objectContaining({
+          ownerNotificationId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          notificationOwnerDiscordUserId: "123",
+          candidateDiscordUserId: "456",
+        }),
+      ],
+    });
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      "https://api.test/api/v1/bot/owner-notifications/pending?limit=5",
+    );
+  });
+
+  it("reports Owner Notification delivery status", async () => {
+    const fetchMock = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(createResponse({ ok: true }));
+
+    const client = createClient(fetchMock);
+    await client.updateOwnerNotificationDelivery({
+      ownerNotificationId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      status: "delivered",
+      deliveredAt: "2026-06-20T00:00:02.000Z",
+    });
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      "https://api.test/api/v1/bot/owner-notifications/delivery-status",
+    );
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(
+      JSON.stringify({
+        ownerNotificationId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        status: "delivered",
+        deliveredAt: "2026-06-20T00:00:02.000Z",
+      }),
+    );
+  });
+
+  it("rejects arbitrary Owner Notification delivery error categories", async () => {
+    const fetchMock = vi.fn<typeof globalThis.fetch>();
+    const client = createClient(fetchMock);
+    const request = {
+      ownerNotificationId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      status: "failed",
+      safeErrorCategory: "unsafe_freeform_category",
+    } as unknown as Parameters<
+      BotApiClient["updateOwnerNotificationDelivery"]
+    >[0];
+
+    await expect(
+      client.updateOwnerNotificationDelivery(request),
+    ).rejects.toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

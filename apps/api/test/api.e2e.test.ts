@@ -144,21 +144,72 @@ class FakeD1Statement {
 
   async run(): Promise<{ meta: { changes: number } }> {
     this.db.calls.push({ sql: this.sql, bindings: this.bindings });
+    if (
+      this.sql.includes("UPDATE owner_notifications") &&
+      this.sql.includes("status = 'delivery_requested'")
+    ) {
+      const ownerNotificationId = this.bindings[1];
+      const row = this.db.pendingOwnerNotifications.find(
+        (notification) =>
+          notification.owner_notification_id === ownerNotificationId &&
+          notification.status === "pending_delivery",
+      );
+      if (!row) {
+        return { meta: { changes: 0 } };
+      }
+      row.status = "delivery_requested";
+      row.safe_error_category = null;
+      row.updated_at = String(this.bindings[0]);
+      return { meta: { changes: 1 } };
+    }
     return { meta: { changes: 1 } };
   }
 
   async all<T>(): Promise<{ results: T[] }> {
     this.db.calls.push({ sql: this.sql, bindings: this.bindings });
+    if (
+      this.sql.includes("FROM owner_notifications") &&
+      this.sql.includes("WHERE status = 'pending_delivery'")
+    ) {
+      const limit = Number(this.bindings[0] ?? 10);
+      return {
+        results: this.db.pendingOwnerNotifications
+          .filter((notification) => notification.status === "pending_delivery")
+          .slice(0, limit) as T[],
+      };
+    }
     return { results: [] };
   }
 }
 
+type FakeOwnerNotificationRow = {
+  owner_notification_id: string;
+  notification_owner_discord_user_id: string;
+  candidate_discord_user_id: string | null;
+  request_id: string | null;
+  trigger_kind: "dm" | "guild_mention" | "automated_trigger_source" | null;
+  status:
+    | "pending_delivery"
+    | "delivery_requested"
+    | "delivered"
+    | "failed"
+    | "suppressed";
+  safe_error_category: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 class FakeD1Database {
   readonly calls: { sql: string; bindings: unknown[] }[] = [];
   readonly allowedOwnerDiscordUserIds: Set<string>;
+  readonly pendingOwnerNotifications: FakeOwnerNotificationRow[];
 
-  constructor(allowedOwnerDiscordUserIds: readonly string[] = []) {
+  constructor(
+    allowedOwnerDiscordUserIds: readonly string[] = [],
+    pendingOwnerNotifications: FakeOwnerNotificationRow[] = [],
+  ) {
     this.allowedOwnerDiscordUserIds = new Set(allowedOwnerDiscordUserIds);
+    this.pendingOwnerNotifications = pendingOwnerNotifications;
   }
 
   prepare(sql: string): FakeD1Statement {
@@ -393,6 +444,94 @@ describe("API Worker routes", () => {
     });
   });
 
+  it("rejects pending Owner Notification claims without bot service auth", async () => {
+    const response = await worker.fetch(
+      new Request("https://api.test/api/v1/bot/owner-notifications/pending"),
+      env,
+    );
+
+    expect(response.status).toBe(401);
+    expect(await readJson(response)).toMatchObject({ code: "unauthorized" });
+  });
+
+  it("claims metadata-only pending Owner Notifications for bot delivery", async () => {
+    const db = new FakeD1Database([], [
+      {
+        owner_notification_id: "01HY0000000000000000000000",
+        notification_owner_discord_user_id: "999",
+        candidate_discord_user_id: "300",
+        request_id: "01HY0000000000000000000001",
+        trigger_kind: "dm",
+        status: "pending_delivery",
+        safe_error_category: null,
+        created_at: "2026-06-20T00:00:00.000Z",
+        updated_at: "2026-06-20T00:00:00.000Z",
+      },
+    ]);
+
+    const response = await worker.fetch(
+      new Request(
+        "https://api.test/api/v1/bot/owner-notifications/pending?limit=5",
+        {
+          headers: {
+            "x-dev-auth-secret": LOCAL_AUTH_BYPASS_SECRET,
+            "x-dev-bot-service": "true",
+          },
+        },
+      ),
+      { ...env, DB: db as unknown as D1Database },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await readJson(response)).toMatchObject({
+      ownerNotifications: [
+        {
+          ownerNotificationId: "01HY0000000000000000000000",
+          notificationOwnerDiscordUserId: "999",
+          candidateDiscordUserId: "300",
+          requestId: "01HY0000000000000000000001",
+          triggerKind: "dm",
+          status: "delivery_requested",
+          safeErrorCategory: null,
+          createdAt: "2026-06-20T00:00:00.000Z",
+        },
+      ],
+    });
+    expect(
+      dbCallsContaining(db, "UPDATE owner_notifications").at(-1)?.sql,
+    ).toContain("AND status = 'pending_delivery'");
+    expect(dbBindingStrings(db)).not.toContain(
+      "SAFE_SENTINEL_OWNER_NOTIFICATION_CONTENT_001",
+    );
+  });
+
+  it("rejects arbitrary Owner Notification delivery error categories", async () => {
+    const response = await worker.fetch(
+      new Request(
+        "https://api.test/api/v1/bot/owner-notifications/delivery-status",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-dev-auth-secret": LOCAL_AUTH_BYPASS_SECRET,
+            "x-dev-bot-service": "true",
+          },
+          body: JSON.stringify({
+            ownerNotificationId: "01HY0000000000000000000000",
+            status: "failed",
+            safeErrorCategory: "unsafe_freeform_category",
+          }),
+        },
+      ),
+      { ...env, DB: new FakeD1Database() as unknown as D1Database },
+    );
+
+    expect(response.status).toBe(400);
+    expect(await readJson(response)).toMatchObject({
+      code: "invalid_request",
+    });
+  });
+
   it("accepts metadata-only bot message intake", async () => {
     const response = await worker.fetch(
       new Request("https://api.test/api/v1/bot/messages/intake", {
@@ -524,7 +663,7 @@ describe("API Worker routes", () => {
     expect(secondBody.providerCallId).not.toBe(firstBody.providerCallId);
   });
 
-  it("records fake provider call audit metadata without response text", async () => {
+  it("records fake provider call audit metadata without generated content", async () => {
     const db = new FakeD1Database(["300"]);
     const response = await worker.fetch(
       new Request("https://api.test/api/v1/bot/messages/respond", {

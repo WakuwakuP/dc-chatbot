@@ -332,6 +332,14 @@ export type OwnerNotificationStatus = v.InferOutput<
   typeof OwnerNotificationStatusSchema
 >;
 
+export const OwnerNotificationDeliverySafeErrorCategorySchema = v.picklist([
+  "discord_api_error",
+  "discord_delivery_failed",
+]);
+export type OwnerNotificationDeliverySafeErrorCategory = v.InferOutput<
+  typeof OwnerNotificationDeliverySafeErrorCategorySchema
+>;
+
 export const OwnerNotificationItemSchema = v.object({
   ownerNotificationId: UlidSchema,
   notificationOwnerDiscordUserId: DiscordSnowflakeSchema,
@@ -341,7 +349,9 @@ export const OwnerNotificationItemSchema = v.object({
   requestId: v.optional(v.union([UlidSchema, v.null()])),
   triggerKind: v.optional(v.union([TriggerKindSchema, v.null()])),
   status: OwnerNotificationStatusSchema,
-  safeErrorCategory: v.optional(v.union([v.string(), v.null()])),
+  safeErrorCategory: v.optional(
+    v.union([OwnerNotificationDeliverySafeErrorCategorySchema, v.null()]),
+  ),
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema,
 });
@@ -356,10 +366,17 @@ export type OwnerNotificationListResponse = v.InferOutput<
   typeof OwnerNotificationListResponseSchema
 >;
 
+export const BotOwnerNotificationDeliveryListResponseSchema = v.object({
+  ownerNotifications: v.array(OwnerNotificationItemSchema),
+});
+export type BotOwnerNotificationDeliveryListResponse = v.InferOutput<
+  typeof BotOwnerNotificationDeliveryListResponseSchema
+>;
+
 export const BotOwnerNotificationDeliveryUpdateRequestSchema = v.object({
   ownerNotificationId: UlidSchema,
   status: v.picklist(["delivery_requested", "delivered", "failed"]),
-  safeErrorCategory: v.optional(v.pipe(v.string(), v.maxLength(80))),
+  safeErrorCategory: v.optional(OwnerNotificationDeliverySafeErrorCategorySchema),
   deliveredAt: v.optional(IsoDateTimeSchema),
 });
 export type BotOwnerNotificationDeliveryUpdateRequest = v.InferOutput<

@@ -34,6 +34,12 @@ function createApiClient(): BotApiClient {
       .fn<BotApiClient["intakeMessage"]>()
       .mockResolvedValue(IGNORE_RESPONSE),
     requestResponse: vi.fn<BotApiClient["requestResponse"]>(),
+    fetchPendingOwnerNotifications: vi.fn<
+      BotApiClient["fetchPendingOwnerNotifications"]
+    >(),
+    updateOwnerNotificationDelivery: vi.fn<
+      BotApiClient["updateOwnerNotificationDelivery"]
+    >(),
   };
 }
 
@@ -116,7 +122,7 @@ describe("handleDiscordMessageCreate", () => {
       id: "11",
       authorId: "101",
       channel,
-      content: "ログに出してはいけない本文",
+      content: "SAFE_SENTINEL_MESSAGE_001",
     });
     const apiClient = createApiClient();
     const logger = { info: vi.fn() };
@@ -138,11 +144,11 @@ describe("handleDiscordMessageCreate", () => {
         guildId: null,
         authorDiscordUserId: "101",
         isDirectMessage: true,
-        contentLength: "ログに出してはいけない本文".length,
+        contentLength: "SAFE_SENTINEL_MESSAGE_001".length,
       }),
     );
     expect(JSON.stringify(logger.info.mock.calls)).not.toContain(
-      "ログに出してはいけない本文",
+      "SAFE_SENTINEL_MESSAGE_001",
     );
     expect(apiClient.intakeMessage).not.toHaveBeenCalled();
   });

@@ -6,6 +6,9 @@ export type OwnerNotificationStatus =
   | "delivered"
   | "failed"
   | "suppressed";
+export type OwnerNotificationDeliverySafeErrorCategory =
+  | "discord_api_error"
+  | "discord_delivery_failed";
 export type AutomatedTriggerSourceStatus = "active" | "disabled";
 export type AutomatedTriggerReplyMode = "reply" | "channel_message" | "none";
 export type ProviderKind = "fake" | "nvidia_nim";
@@ -183,7 +186,7 @@ export type OwnerNotificationRecord = {
   requestId: string | null;
   triggerKind: "dm" | "guild_mention" | "automated_trigger_source" | null;
   status: OwnerNotificationStatus;
-  safeErrorCategory: string | null;
+  safeErrorCategory: OwnerNotificationDeliverySafeErrorCategory | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -332,10 +335,20 @@ function mapOwnerNotification(
     requestId: row.request_id,
     triggerKind: row.trigger_kind,
     status: row.status,
-    safeErrorCategory: row.safe_error_category,
+    safeErrorCategory: mapOwnerNotificationSafeErrorCategory(
+      row.safe_error_category,
+    ),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function mapOwnerNotificationSafeErrorCategory(
+  value: string | null,
+): OwnerNotificationDeliverySafeErrorCategory | null {
+  return value === "discord_api_error" || value === "discord_delivery_failed"
+    ? value
+    : null;
 }
 
 function defaultModelSettings(nowIsoUtc: string): ModelSettingsRecord {
@@ -1400,7 +1413,7 @@ export class D1DcChatbotRepository {
     requestId: string | null;
     triggerKind: "dm" | "guild_mention" | "automated_trigger_source" | null;
     status: OwnerNotificationStatus;
-    safeErrorCategory: string | null;
+    safeErrorCategory: OwnerNotificationDeliverySafeErrorCategory | null;
     createdAt: string;
     retainUntil: string;
   }): Promise<void> {
@@ -1463,10 +1476,60 @@ export class D1DcChatbotRepository {
     return rows.map(mapOwnerNotification);
   }
 
+  async claimPendingOwnerNotifications(input: {
+    limit: number;
+    nowIsoUtc: string;
+  }): Promise<OwnerNotificationRecord[]> {
+    const rows = await allRows<OwnerNotificationRow>(
+      this.db
+        .prepare(
+          `SELECT owner_notification_id,
+                  notification_owner_discord_user_id,
+                  candidate_discord_user_id,
+                  request_id,
+                  trigger_kind,
+                  status,
+                  safe_error_category,
+                  created_at,
+                  updated_at
+           FROM owner_notifications
+           WHERE status = 'pending_delivery'
+           ORDER BY created_at ASC, owner_notification_id ASC
+           LIMIT ?`,
+        )
+        .bind(input.limit),
+    );
+
+    const claimed: OwnerNotificationRecord[] = [];
+    for (const row of rows) {
+      const result = await this.db
+        .prepare(
+          `UPDATE owner_notifications
+           SET status = 'delivery_requested',
+               safe_error_category = NULL,
+               updated_at = ?
+           WHERE owner_notification_id = ?
+             AND status = 'pending_delivery'`,
+        )
+        .bind(input.nowIsoUtc, row.owner_notification_id)
+        .run();
+      if ((result.meta.changes ?? 0) > 0) {
+        claimed.push({
+          ...mapOwnerNotification(row),
+          status: "delivery_requested",
+          safeErrorCategory: null,
+          updatedAt: input.nowIsoUtc,
+        });
+      }
+    }
+
+    return claimed;
+  }
+
   async updateOwnerNotificationDelivery(input: {
     ownerNotificationId: string;
     status: "delivery_requested" | "delivered" | "failed";
-    safeErrorCategory: string | null;
+    safeErrorCategory: OwnerNotificationDeliverySafeErrorCategory | null;
     updatedAt: string;
   }): Promise<boolean> {
     const result = await this.db

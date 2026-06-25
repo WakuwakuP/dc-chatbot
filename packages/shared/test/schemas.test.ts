@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   BotMessageIntakeRequestSchema,
+  BotOwnerNotificationDeliveryListResponseSchema,
+  BotOwnerNotificationDeliveryUpdateRequestSchema,
   OwnerSettingsResponseSchema,
   ProviderConfigMetadataSchema,
   SafeProviderErrorCategorySchema,
@@ -24,6 +26,41 @@ describe("BotMessageIntakeRequestSchema", () => {
 
     expect(parsed.triggerKind).toBe("dm");
     expect("messageContent" in parsed).toBe(false);
+  });
+});
+
+describe("BotOwnerNotificationDeliveryListResponseSchema", () => {
+  it("accepts metadata-only Owner Notification delivery instructions", () => {
+    const parsed = parseJson(BotOwnerNotificationDeliveryListResponseSchema, {
+      ownerNotifications: [
+        {
+          ownerNotificationId: "01HY0000000000000000000000",
+          notificationOwnerDiscordUserId: "123",
+          candidateDiscordUserId: "456",
+          requestId: "01HY0000000000000000000001",
+          triggerKind: "dm",
+          status: "delivery_requested",
+          safeErrorCategory: null,
+          createdAt: "2026-06-20T00:00:00.000Z",
+          updatedAt: "2026-06-20T00:00:01.000Z",
+        },
+      ],
+    });
+
+    expect(parsed.ownerNotifications[0]?.candidateDiscordUserId).toBe("456");
+    expect(JSON.stringify(parsed)).not.toContain("messageContent");
+  });
+});
+
+describe("BotOwnerNotificationDeliveryUpdateRequestSchema", () => {
+  it("rejects arbitrary Owner Notification delivery error categories", () => {
+    expect(() =>
+      parseJson(BotOwnerNotificationDeliveryUpdateRequestSchema, {
+        ownerNotificationId: "01HY0000000000000000000000",
+        status: "failed",
+        safeErrorCategory: "unsafe_freeform_category",
+      }),
+    ).toThrow();
   });
 });
 

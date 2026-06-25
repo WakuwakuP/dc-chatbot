@@ -16,6 +16,7 @@ import {
 } from "@dc-chatbot/provider";
 import {
   BotMessageIntakeRequestSchema,
+  BotOwnerNotificationDeliveryListResponseSchema,
   BotOwnerNotificationDeliveryUpdateRequestSchema,
   BotRespondRequestSchema,
   CreateAutomatedTriggerSourceRequestSchema,
@@ -28,6 +29,7 @@ import {
   UpdatePromptSettingsMetadataRequestSchema,
   createUlid,
   type BotMessageIntakeResponse,
+  type BotOwnerNotificationDeliveryListResponse,
   type BotRespondResponse,
   type ConfiguredProviderAccessStatus,
   type ContextFetchPlan,
@@ -1575,6 +1577,33 @@ async function handleListOwnerNotifications(
   return jsonResponse(body);
 }
 
+async function handleClaimPendingOwnerNotifications(
+  request: Request,
+  env: Env,
+): Promise<Response> {
+  if (!authenticateBotService(request, env)) {
+    return problemResponse(401, "unauthorized", "Unauthorized");
+  }
+  const repository = createRepository(env);
+  if (!repository) {
+    return problemResponse(503, "database_unavailable", "Database unavailable");
+  }
+  const url = new URL(request.url);
+  const requestedLimit = Number(url.searchParams.get("limit") ?? 10);
+  const limit = Number.isFinite(requestedLimit)
+    ? Math.min(Math.max(Math.trunc(requestedLimit), 1), 50)
+    : 10;
+  const body: BotOwnerNotificationDeliveryListResponse = {
+    ownerNotifications: await repository.claimPendingOwnerNotifications({
+      limit,
+      nowIsoUtc: new Date().toISOString(),
+    }),
+  };
+  return jsonResponse(
+    parseJson(BotOwnerNotificationDeliveryListResponseSchema, body),
+  );
+}
+
 async function handleOwnerNotificationDeliveryUpdate(
   request: Request,
   env: Env,
@@ -1821,6 +1850,13 @@ async function fetch(request: Request, env: Env): Promise<Response> {
     url.pathname === "/api/v1/bot/messages/response-metadata"
   ) {
     return handleDiscordResponseMessageMetadata(request, env);
+  }
+
+  if (
+    request.method === "GET" &&
+    url.pathname === "/api/v1/bot/owner-notifications/pending"
+  ) {
+    return handleClaimPendingOwnerNotifications(request, env);
   }
 
   if (

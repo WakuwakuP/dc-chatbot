@@ -3,6 +3,7 @@ import type {
   LLMProvider,
   ProviderGenerateRequest,
   ProviderGenerateResponse,
+  ProviderRuntimeStatus,
   SafeProviderErrorCategory,
 } from "./types";
 
@@ -45,6 +46,8 @@ export class ProviderError extends Error {
 }
 
 export class NvidiaNimLLMProvider implements LLMProvider {
+  readonly providerKind = "nvidia_nim";
+
   private readonly bearerToken: string;
   private readonly baseUrl: string;
   private readonly fetchFn: FetchLike;
@@ -55,8 +58,8 @@ export class NvidiaNimLLMProvider implements LLMProvider {
     const bearerToken = options.bearerToken.trim();
     if (bearerToken.length === 0) {
       throw new ProviderError(
-        "temporary_unavailable",
-        "NVIDIA NIM bearer token is not configured",
+        "not_configured",
+        "NVIDIA NIM API Key is not configured",
       );
     }
 
@@ -97,18 +100,31 @@ export class NvidiaNimLLMProvider implements LLMProvider {
       .json()
       .catch(() => null)) as NvidiaNimChatCompletionResponse | null;
     if (!body) {
-      throw new ProviderError("unknown", "NVIDIA NIM response was invalid");
+      throw new ProviderError(
+        "invalid_response",
+        "NVIDIA NIM response was invalid",
+      );
     }
 
     const replyText = body.choices?.[0]?.message?.content;
     if (typeof replyText !== "string" || replyText.length === 0) {
-      throw new ProviderError("unknown", "NVIDIA NIM response was invalid");
+      throw new ProviderError(
+        "invalid_response",
+        "NVIDIA NIM response was invalid",
+      );
     }
 
     return {
       providerCallId: this.providerCallIdFactory(),
       model: typeof body.model === "string" ? body.model : request.model,
       replyText,
+    };
+  }
+
+  getStatus(): ProviderRuntimeStatus {
+    return {
+      providerKind: this.providerKind,
+      configuredProviderAccessStatus: "available",
     };
   }
 }
@@ -148,7 +164,7 @@ function mapHttpStatusToSafeCategory(
   status: number,
 ): SafeProviderErrorCategory {
   if (status === 401 || status === 403) {
-    return "temporary_unavailable";
+    return "authentication_failed";
   }
   if (status === 429) {
     return "rate_limited";

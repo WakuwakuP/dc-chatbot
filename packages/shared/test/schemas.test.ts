@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   BotMessageIntakeRequestSchema,
   OwnerSettingsResponseSchema,
+  ProviderConfigMetadataSchema,
+  SafeProviderErrorCategorySchema,
   UpdatePromptSettingsMetadataRequestSchema,
   parseJson,
 } from "../src/index";
@@ -22,6 +24,39 @@ describe("BotMessageIntakeRequestSchema", () => {
 
     expect(parsed.triggerKind).toBe("dm");
     expect("messageContent" in parsed).toBe(false);
+  });
+});
+
+describe("Provider metadata schemas", () => {
+  it("accepts metadata-only NVIDIA NIM provider config", () => {
+    const parsed = parseJson(ProviderConfigMetadataSchema, {
+      providerKind: "nvidia_nim",
+      configuredProviderAccess: {
+        status: "available",
+        checkedAt: "2026-06-20T00:00:00.000Z",
+      },
+      modelSettings: {
+        contextSelectionModel: "fake-context-selection",
+        responseDecisionModel: "fake-response-decision",
+        responseGenerationModel: "fake-response-generation",
+      },
+    });
+
+    expect(parsed.providerKind).toBe("nvidia_nim");
+    expect(Object.keys(parsed)).toEqual([
+      "providerKind",
+      "configuredProviderAccess",
+      "modelSettings",
+    ]);
+  });
+
+  it("accepts safe provider error categories without secret material", () => {
+    const parsed = parseJson(
+      SafeProviderErrorCategorySchema,
+      "authentication_failed",
+    );
+
+    expect(parsed).toBe("authentication_failed");
   });
 });
 

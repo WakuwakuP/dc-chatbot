@@ -3,6 +3,7 @@ import type {
   LLMProvider,
   ProviderGenerateRequest,
   ProviderGenerateResponse,
+  ProviderRuntimeStatus,
 } from "./types";
 
 export type FakeLLMProviderOptions = {
@@ -10,10 +11,19 @@ export type FakeLLMProviderOptions = {
 };
 
 export class FakeLLMProvider implements LLMProvider {
+  readonly providerKind = "fake";
+
   private readonly providerCallIdFactory: () => string;
 
   constructor(options: FakeLLMProviderOptions = {}) {
     this.providerCallIdFactory = options.providerCallIdFactory ?? createUlid;
+  }
+
+  getStatus(): ProviderRuntimeStatus {
+    return {
+      providerKind: this.providerKind,
+      configuredProviderAccessStatus: "available",
+    };
   }
 
   async generateResponse(

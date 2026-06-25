@@ -18,6 +18,16 @@ describe("FakeLLMProvider", () => {
     expect(Object.keys(response)).not.toContain("rawResponseBody");
   });
 
+  it("reports metadata-only configured provider access status", () => {
+    const provider = new FakeLLMProvider();
+
+    expect(provider.providerKind).toBe("fake");
+    expect(provider.getStatus()).toEqual({
+      providerKind: "fake",
+      configuredProviderAccessStatus: "available",
+    });
+  });
+
   it("generates a distinct provider call ID for each response by default", async () => {
     const provider = new FakeLLMProvider();
     const request = {
@@ -32,6 +42,8 @@ describe("FakeLLMProvider", () => {
 
     expect(firstResponse.providerCallId).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
     expect(secondResponse.providerCallId).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
-    expect(secondResponse.providerCallId).not.toBe(firstResponse.providerCallId);
+    expect(secondResponse.providerCallId).not.toBe(
+      firstResponse.providerCallId,
+    );
   });
 });

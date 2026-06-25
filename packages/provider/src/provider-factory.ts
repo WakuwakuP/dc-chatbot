@@ -20,7 +20,7 @@ export function createLLMProvider(
     case "nvidia_nim":
       if (!options.nvidiaNim) {
         throw new ProviderError(
-          "temporary_unavailable",
+          "not_configured",
           "NVIDIA NIM provider options are required",
         );
       }

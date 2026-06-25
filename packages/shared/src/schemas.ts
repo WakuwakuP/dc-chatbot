@@ -30,6 +30,42 @@ export type RegisteredMemberStatus = v.InferOutput<
   typeof RegisteredMemberStatusSchema
 >;
 
+export const ProviderKindSchema = v.picklist(["fake", "nvidia_nim"]);
+export type ProviderKind = v.InferOutput<typeof ProviderKindSchema>;
+
+export const SafeProviderErrorCategorySchema = v.picklist([
+  "not_configured",
+  "authentication_failed",
+  "rate_limited",
+  "temporary_unavailable",
+  "policy_rejected",
+  "invalid_response",
+  "unknown",
+]);
+export type SafeProviderErrorCategory = v.InferOutput<
+  typeof SafeProviderErrorCategorySchema
+>;
+
+export const ConfiguredProviderAccessStatusSchema = v.picklist([
+  "available",
+  "not_configured",
+  "unavailable",
+]);
+export type ConfiguredProviderAccessStatus = v.InferOutput<
+  typeof ConfiguredProviderAccessStatusSchema
+>;
+
+export const ConfiguredProviderAccessMetadataSchema = v.object({
+  status: ConfiguredProviderAccessStatusSchema,
+  checkedAt: v.optional(v.union([IsoDateTimeSchema, v.null()])),
+  safeErrorCategory: v.optional(
+    v.union([SafeProviderErrorCategorySchema, v.null()]),
+  ),
+});
+export type ConfiguredProviderAccessMetadata = v.InferOutput<
+  typeof ConfiguredProviderAccessMetadataSchema
+>;
+
 export const OwnerMeResponseSchema = v.object({
   ownerDiscordUserId: DiscordSnowflakeSchema,
   role: OwnerRoleSchema,
@@ -137,6 +173,22 @@ export const ModelSettingsSchema = v.object({
   responseGenerationModel: NonEmptySafeStringSchema,
 });
 export type ModelSettings = v.InferOutput<typeof ModelSettingsSchema>;
+
+export const ProviderConfigMetadataSchema = v.object({
+  providerKind: ProviderKindSchema,
+  configuredProviderAccess: ConfiguredProviderAccessMetadataSchema,
+  modelSettings: v.optional(ModelSettingsSchema),
+});
+export type ProviderConfigMetadata = v.InferOutput<
+  typeof ProviderConfigMetadataSchema
+>;
+
+export const OwnerProviderStatusResponseSchema = v.object({
+  provider: ProviderConfigMetadataSchema,
+});
+export type OwnerProviderStatusResponse = v.InferOutput<
+  typeof OwnerProviderStatusResponseSchema
+>;
 
 export const UpdateModelSettingsRequestSchema = ModelSettingsSchema;
 export type UpdateModelSettingsRequest = v.InferOutput<

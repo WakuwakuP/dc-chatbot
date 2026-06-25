@@ -139,6 +139,26 @@ class FakeD1Statement {
       } as T;
     }
 
+    if (
+      this.sql.includes("FROM automated_trigger_sources") &&
+      this.sql.includes("status = 'active'") &&
+      typeof this.bindings[0] === "string" &&
+      this.db.activeAutomatedSourceDiscordUserIds.has(this.bindings[0])
+    ) {
+      return {
+        automated_trigger_source_id: "01HY0000000000000000000009",
+        source_discord_user_id: this.bindings[0],
+        source_application_id: null,
+        assigned_owner_discord_user_id: "999",
+        status: "active",
+        reply_mode: "reply",
+        cooldown_seconds: 60,
+        last_triggered_at: null,
+        created_at: "2026-06-20T00:00:00.000Z",
+        updated_at: "2026-06-20T00:00:00.000Z",
+      } as T;
+    }
+
     return null;
   }
 
@@ -202,13 +222,18 @@ type FakeOwnerNotificationRow = {
 class FakeD1Database {
   readonly calls: { sql: string; bindings: unknown[] }[] = [];
   readonly allowedOwnerDiscordUserIds: Set<string>;
+  readonly activeAutomatedSourceDiscordUserIds: Set<string>;
   readonly pendingOwnerNotifications: FakeOwnerNotificationRow[];
 
   constructor(
     allowedOwnerDiscordUserIds: readonly string[] = [],
     pendingOwnerNotifications: FakeOwnerNotificationRow[] = [],
+    activeAutomatedSourceDiscordUserIds: readonly string[] = [],
   ) {
     this.allowedOwnerDiscordUserIds = new Set(allowedOwnerDiscordUserIds);
+    this.activeAutomatedSourceDiscordUserIds = new Set(
+      activeAutomatedSourceDiscordUserIds,
+    );
     this.pendingOwnerNotifications = pendingOwnerNotifications;
   }
 
@@ -691,12 +716,16 @@ describe("API Worker routes", () => {
     expect(secondResponse.status).toBe(200);
     const firstBody = (await readJson(firstResponse)) as {
       providerCallId: string;
+      decision: { shouldRespond: boolean };
     };
     const secondBody = (await readJson(secondResponse)) as {
       providerCallId: string;
+      decision: { shouldRespond: boolean };
     };
     expect(firstBody.providerCallId).toMatch(ULID_REGEX);
     expect(secondBody.providerCallId).toMatch(ULID_REGEX);
+    expect(firstBody.decision.shouldRespond).toBe(true);
+    expect(secondBody.decision.shouldRespond).toBe(true);
     expect(secondBody.providerCallId).not.toBe(firstBody.providerCallId);
   });
 
@@ -728,12 +757,18 @@ describe("API Worker routes", () => {
       db,
       "INSERT INTO provider_call_audit_metadata",
     );
-    expect(providerAudit).toHaveLength(1);
-    expect(providerAudit[0]?.bindings.slice(1, 7)).toEqual([
+    expect(providerAudit).toHaveLength(3);
+    expect(providerAudit.map((call) => call.bindings[5])).toEqual([
+      "context_selection",
+      "response_decision",
+      "response_generation",
+    ]);
+    expect(providerAudit.at(-1)?.bindings.slice(1, 8)).toEqual([
       "01HY0000000000000000000000",
       "fake",
       "local",
       "fake-model",
+      "response_generation",
       "completed",
       null,
     ]);
@@ -749,6 +784,97 @@ describe("API Worker routes", () => {
       expect.any(String),
     ]);
     expect(dbBindingStrings(db)).not.toContain(body.replyChunks[0]);
+  });
+
+  it("skips Context Selection and Response Decision audits for Automated Trigger Sources", async () => {
+    const db = new FakeD1Database([], [], ["300"]);
+    const response = await worker.fetch(
+      new Request("https://api.test/api/v1/bot/messages/respond", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-dev-auth-secret": LOCAL_AUTH_BYPASS_SECRET,
+          "x-dev-bot-service": "true",
+        },
+        body: JSON.stringify({
+          requestId: "01HY0000000000000000000000",
+          triggerMessageId: "100",
+          triggerAuthorDiscordUserId: "300",
+          triggerKind: "automated_trigger_source",
+          model: "fake-model",
+          conversationContextMessageIds: ["100"],
+        }),
+      }),
+      { ...env, DB: db as unknown as D1Database },
+    );
+
+    expect(response.status).toBe(200);
+    const providerAudit = dbCallsContaining(
+      db,
+      "INSERT INTO provider_call_audit_metadata",
+    );
+    expect(providerAudit).toHaveLength(1);
+    expect(providerAudit[0]?.bindings[5]).toBe("response_generation");
+    expect(
+      dbCallsContaining(db, "INSERT INTO selected_context_message_ids").at(-1)
+        ?.bindings,
+    ).toContain("automated_trigger");
+  });
+
+  it("returns metadata-only no-response decision before provider availability check", async () => {
+    const db = new FakeD1Database(["300"]);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await worker.fetch(
+      new Request("https://api.test/api/v1/bot/messages/respond", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-dev-auth-secret": LOCAL_AUTH_BYPASS_SECRET,
+          "x-dev-bot-service": "true",
+        },
+        body: JSON.stringify({
+          requestId: "01HY0000000000000000000000",
+          triggerMessageId: "100",
+          triggerAuthorDiscordUserId: "300",
+          triggerKind: "guild_mention",
+          model: "meta/llama-3.1-70b-instruct",
+          conversationContextMessageIds: [],
+        }),
+      }),
+      {
+        ...env,
+        DB: db as unknown as D1Database,
+        LLM_PROVIDER: "nvidia_nim",
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await readJson(response)).toMatchObject({
+      requestId: "01HY0000000000000000000000",
+      decision: {
+        shouldRespond: false,
+        reason: "no_selected_context",
+      },
+      replyChunks: [],
+      providerCallId: null,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    const providerAudit = dbCallsContaining(
+      db,
+      "INSERT INTO provider_call_audit_metadata",
+    );
+    expect(providerAudit.map((call) => call.bindings[5])).toEqual([
+      "context_selection",
+      "response_decision",
+    ]);
+    expect(
+      providerAudit.some((call) => call.bindings[5] === "response_generation"),
+    ).toBe(false);
+    expect(
+      dbCallsContaining(db, "INSERT INTO selected_context_message_ids"),
+    ).toHaveLength(0);
   });
 
   it("maps missing NVIDIA NIM API Key configuration to safe metadata", async () => {
@@ -799,12 +925,13 @@ describe("API Worker routes", () => {
     ]);
     expect(
       dbCallsContaining(db, "INSERT INTO provider_call_audit_metadata").at(-1)
-        ?.bindings.slice(1, 7),
+        ?.bindings.slice(1, 8),
     ).toEqual([
       "01HY0000000000000000000000",
       "nvidia_nim",
       "deployment",
       "meta/llama-3.1-70b-instruct",
+      "response_generation",
       "failed",
       "not_configured",
     ]);
@@ -861,12 +988,13 @@ describe("API Worker routes", () => {
     ]);
     expect(
       dbCallsContaining(db, "INSERT INTO provider_call_audit_metadata").at(-1)
-        ?.bindings.slice(1, 7),
+        ?.bindings.slice(1, 8),
     ).toEqual([
       "01HY0000000000000000000000",
       "nvidia_nim",
       "deployment",
       "meta/llama-3.1-70b-instruct",
+      "response_generation",
       "failed",
       "authentication_failed",
     ]);

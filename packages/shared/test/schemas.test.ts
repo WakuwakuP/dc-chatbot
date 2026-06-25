@@ -3,8 +3,10 @@ import {
   BotMessageIntakeRequestSchema,
   BotOwnerNotificationDeliveryListResponseSchema,
   BotOwnerNotificationDeliveryUpdateRequestSchema,
+  BotRespondResponseSchema,
   OwnerDashboardSummaryResponseSchema,
   OwnerSettingsResponseSchema,
+  ProviderCallStageSchema,
   ProviderConfigMetadataSchema,
   SafeProviderErrorCategorySchema,
   UpdatePromptSettingsMetadataRequestSchema,
@@ -65,6 +67,23 @@ describe("BotOwnerNotificationDeliveryUpdateRequestSchema", () => {
   });
 });
 
+describe("BotRespondResponseSchema", () => {
+  it("accepts metadata-only final Response Decision skip", () => {
+    const parsed = parseJson(BotRespondResponseSchema, {
+      requestId: "01HY0000000000000000000000",
+      decision: {
+        shouldRespond: false,
+        reason: "trigger_message_not_selected",
+      },
+      replyChunks: [],
+      providerCallId: null,
+    });
+
+    expect(parsed.decision?.shouldRespond).toBe(false);
+    expect(parsed.replyChunks).toEqual([]);
+  });
+});
+
 describe("Provider metadata schemas", () => {
   it("accepts metadata-only NVIDIA NIM provider config", () => {
     const parsed = parseJson(ProviderConfigMetadataSchema, {
@@ -95,6 +114,12 @@ describe("Provider metadata schemas", () => {
     );
 
     expect(parsed).toBe("authentication_failed");
+  });
+
+  it("accepts explicit provider call stages", () => {
+    const parsed = parseJson(ProviderCallStageSchema, "response_decision");
+
+    expect(parsed).toBe("response_decision");
   });
 });
 

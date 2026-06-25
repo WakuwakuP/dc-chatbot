@@ -12,6 +12,10 @@ export type OwnerNotificationDeliverySafeErrorCategory =
 export type AutomatedTriggerSourceStatus = "active" | "disabled";
 export type AutomatedTriggerReplyMode = "reply" | "channel_message" | "none";
 export type ProviderKind = "fake" | "nvidia_nim";
+export type ProviderCallStage =
+  | "context_selection"
+  | "response_decision"
+  | "response_generation";
 export type ConfiguredProviderAccessStatus =
   | "available"
   | "not_configured"
@@ -49,6 +53,7 @@ type InsertProviderCallAuditBaseInput = {
   providerCallId: string;
   requestId: string;
   model: string;
+  providerCallStage: ProviderCallStage;
   status: "started" | "completed" | "failed";
   safeErrorCategory: SafeProviderErrorCategory | null;
   durationMs: number | null;
@@ -745,12 +750,13 @@ export class D1DcChatbotRepository {
            provider_kind,
            provider_ref,
            model,
+           provider_call_stage,
            status,
            safe_error_category,
            duration_ms,
            created_at,
            retain_until
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         input.providerCallId,
@@ -758,6 +764,7 @@ export class D1DcChatbotRepository {
         input.providerKind ?? "fake",
         input.providerRef ?? "deployment",
         input.model,
+        input.providerCallStage,
         input.status,
         input.safeErrorCategory,
         input.durationMs,

@@ -29,15 +29,19 @@ import {
   UpdatePromptSettingsMetadataRequestSchema,
   createUlid,
   type BotMessageIntakeResponse,
+  type BotRespondRequest,
   type BotOwnerNotificationDeliveryListResponse,
   type BotRespondResponse,
   type ConfiguredProviderAccessStatus,
   type ContextFetchPlan,
+  type ConversationContextMessageInput,
+  type FinalResponseDecision,
   type HealthResponse,
   type OwnerDashboardSummaryResponse,
   type OwnerMeResponse,
   type OwnerNotificationListResponse,
   type OwnerRole,
+  type ProviderCallStage,
   type ProblemDetails,
   type SafeProviderErrorCategory,
   parseJson,
@@ -671,6 +675,83 @@ async function recordAudit(
   });
 }
 
+async function recordDeterministicProviderStageAudit(
+  repository: D1DcChatbotRepository,
+  providerIdentity: ActiveProviderIdentity,
+  input: {
+    requestId: string;
+    providerCallStage: ProviderCallStage;
+    model: string;
+    nowIsoUtc: string;
+  },
+): Promise<void> {
+  await repository.insertProviderCallAudit({
+    ...providerIdentity,
+    providerCallId: createUlid(),
+    requestId: input.requestId,
+    model: input.model,
+    providerCallStage: input.providerCallStage,
+    status: "completed",
+    safeErrorCategory: null,
+    durationMs: 0,
+    createdAt: input.nowIsoUtc,
+    retainUntil: addDaysIso(input.nowIsoUtc, 365),
+  });
+}
+
+type ContextSelectionStageResult = {
+  selectedContextMessageIds: readonly string[];
+  selectedConversationContextMessages?: readonly ConversationContextMessageInput[];
+};
+
+function runDeterministicContextSelection(
+  respondRequest: BotRespondRequest,
+): ContextSelectionStageResult {
+  const selectedContextMessageIds = uniqueStrings(
+    respondRequest.conversationContextMessages
+      ? respondRequest.conversationContextMessages.map(
+          (message) => message.messageId,
+        )
+      : respondRequest.conversationContextMessageIds,
+  );
+  if (!respondRequest.conversationContextMessages) {
+    return { selectedContextMessageIds };
+  }
+
+  const selectedIdSet = new Set(selectedContextMessageIds);
+  return {
+    selectedContextMessageIds,
+    selectedConversationContextMessages:
+      respondRequest.conversationContextMessages.filter((message) =>
+        selectedIdSet.has(message.messageId),
+      ),
+  };
+}
+
+function runDeterministicResponseDecision(input: {
+  triggerKind: BotRespondRequest["triggerKind"];
+  triggerMessageId: string;
+  selectedContextMessageIds: readonly string[];
+}): FinalResponseDecision {
+  if (input.triggerKind === "automated_trigger_source") {
+    return { shouldRespond: true, reason: "automated_trigger_source" };
+  }
+  if (input.triggerKind === "dm") {
+    return { shouldRespond: true, reason: "dm_allowed" };
+  }
+  if (input.selectedContextMessageIds.length === 0) {
+    return { shouldRespond: false, reason: "no_selected_context" };
+  }
+  if (!input.selectedContextMessageIds.includes(input.triggerMessageId)) {
+    return { shouldRespond: false, reason: "trigger_message_not_selected" };
+  }
+  return { shouldRespond: true, reason: "selected_context_available" };
+}
+
+function uniqueStrings(values: readonly string[]): string[] {
+  return [...new Set(values)];
+}
+
 async function recordOwnerSettingAudit(
   repository: D1DcChatbotRepository,
   auth: OwnerAuth,
@@ -941,6 +1022,88 @@ async function handleBotRespond(request: Request, env: Env): Promise<Response> {
     }
   }
 
+  const contextSelection =
+    respondRequest.triggerKind === "automated_trigger_source"
+      ? {
+          selectedContextMessageIds: uniqueStrings(
+            respondRequest.conversationContextMessages
+              ? respondRequest.conversationContextMessages.map(
+                  (message) => message.messageId,
+                )
+              : respondRequest.conversationContextMessageIds,
+          ),
+          selectedConversationContextMessages:
+            respondRequest.conversationContextMessages,
+        }
+      : runDeterministicContextSelection(respondRequest);
+  const finalDecision =
+    respondRequest.triggerKind === "automated_trigger_source"
+      ? ({
+          shouldRespond: true,
+          reason: "automated_trigger_source",
+        } satisfies FinalResponseDecision)
+      : runDeterministicResponseDecision({
+          triggerKind: respondRequest.triggerKind,
+          triggerMessageId: respondRequest.triggerMessageId,
+          selectedContextMessageIds: contextSelection.selectedContextMessageIds,
+        });
+  if (repository && respondRequest.triggerKind !== "automated_trigger_source") {
+    const providerConfig = await repository.getProviderConfigMetadata(nowIsoUtc);
+    await recordDeterministicProviderStageAudit(
+      repository,
+      providerIdentity,
+      {
+        requestId: respondRequest.requestId,
+        providerCallStage: "context_selection",
+        model: providerConfig.modelSettings.contextSelectionModel,
+        nowIsoUtc,
+      },
+    );
+    await recordDeterministicProviderStageAudit(
+      repository,
+      providerIdentity,
+      {
+        requestId: respondRequest.requestId,
+        providerCallStage: "response_decision",
+        model: providerConfig.modelSettings.responseDecisionModel,
+        nowIsoUtc,
+      },
+    );
+    if (!finalDecision.shouldRespond) {
+      const finishedAt = new Date().toISOString();
+      await Promise.all([
+        recordAudit(repository, {
+          actorType: "bot_service",
+          requestId: respondRequest.requestId,
+          eventType: "bot.message_respond.skipped",
+          status: "completed",
+          nowIsoUtc: finishedAt,
+        }),
+        persistSelectedContextMessageIds(
+          repository,
+          respondRequest.requestId,
+          contextSelection.selectedContextMessageIds,
+          finishedAt,
+          "rule_fallback",
+        ),
+      ]);
+      return jsonResponse({
+        requestId: respondRequest.requestId,
+        decision: finalDecision,
+        replyChunks: [],
+        providerCallId: null,
+      } satisfies BotRespondResponse);
+    }
+  }
+  if (!finalDecision.shouldRespond) {
+    return jsonResponse({
+      requestId: respondRequest.requestId,
+      decision: finalDecision,
+      replyChunks: [],
+      providerCallId: null,
+    } satisfies BotRespondResponse);
+  }
+
   const configuredAccess = configuredProviderAccessStatus(env);
   if (repository) {
     await repository.upsertProviderConfigMetadata({
@@ -963,6 +1126,7 @@ async function handleBotRespond(request: Request, env: Env): Promise<Response> {
           providerCallId: createUlid(),
           requestId: respondRequest.requestId,
           model: respondRequest.model,
+          providerCallStage: "response_generation",
           status: "failed",
           safeErrorCategory,
           durationMs: Date.now() - startedAt,
@@ -987,21 +1151,22 @@ async function handleBotRespond(request: Request, env: Env): Promise<Response> {
     );
   }
 
-  const providerRequest = respondRequest.conversationContextMessages
+  const providerRequest = contextSelection.selectedConversationContextMessages
     ? {
         requestId: respondRequest.requestId,
         model: respondRequest.model,
         triggerKind: respondRequest.triggerKind,
         conversationContextMessageIds:
-          respondRequest.conversationContextMessageIds,
-        conversationContextMessages: respondRequest.conversationContextMessages,
+          contextSelection.selectedContextMessageIds,
+        conversationContextMessages:
+          contextSelection.selectedConversationContextMessages,
       }
     : {
         requestId: respondRequest.requestId,
         model: respondRequest.model,
         triggerKind: respondRequest.triggerKind,
         conversationContextMessageIds:
-          respondRequest.conversationContextMessageIds,
+          contextSelection.selectedContextMessageIds,
       };
   let providerResponse: ProviderGenerateResponse;
   try {
@@ -1025,6 +1190,7 @@ async function handleBotRespond(request: Request, env: Env): Promise<Response> {
           providerCallId: createUlid(),
           requestId: respondRequest.requestId,
           model: respondRequest.model,
+          providerCallStage: "response_generation",
           status: "failed",
           safeErrorCategory,
           durationMs: Date.now() - startedAt,
@@ -1064,6 +1230,7 @@ async function handleBotRespond(request: Request, env: Env): Promise<Response> {
         providerCallId: providerResponse.providerCallId,
         requestId: respondRequest.requestId,
         model: providerResponse.model,
+        providerCallStage: "response_generation",
         status: "completed",
         safeErrorCategory: null,
         durationMs: Date.now() - startedAt,
@@ -1080,9 +1247,7 @@ async function handleBotRespond(request: Request, env: Env): Promise<Response> {
       persistSelectedContextMessageIds(
         repository,
         respondRequest.requestId,
-        respondRequest.conversationContextMessages?.map(
-          (message) => message.messageId,
-        ) ?? respondRequest.conversationContextMessageIds,
+        contextSelection.selectedContextMessageIds,
         finishedAt,
         respondRequest.triggerKind === "automated_trigger_source"
           ? "automated_trigger"
@@ -1093,6 +1258,7 @@ async function handleBotRespond(request: Request, env: Env): Promise<Response> {
 
   const body: BotRespondResponse = {
     requestId: respondRequest.requestId,
+    decision: finalDecision,
     providerCallId: providerResponse.providerCallId,
     replyChunks: [providerResponse.replyText],
   };

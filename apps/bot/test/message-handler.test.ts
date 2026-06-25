@@ -255,6 +255,10 @@ describe("handleDiscordMessageCreate", () => {
     });
     vi.mocked(apiClient.requestResponse).mockResolvedValue({
       requestId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      decision: {
+        shouldRespond: true,
+        reason: "selected_context_available",
+      },
       replyChunks: ["r"],
       providerCallId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
     });
@@ -278,6 +282,52 @@ describe("handleDiscordMessageCreate", () => {
     );
     expect(channel.sendTyping).toHaveBeenCalled();
     expect(triggerMessage.reply).toHaveBeenCalledWith("r");
+  });
+
+  it("does not post a Discord reply when final Response Decision skips", async () => {
+    const channel = createChannel();
+    const triggerMessage = createMessage({
+      id: "6",
+      authorId: "100",
+      channel,
+      guildId: "10",
+      mentionedBot: true,
+    });
+    channel.messages.fetch.mockResolvedValue(
+      new Map([[triggerMessage.id, triggerMessage]]),
+    );
+    const apiClient = createApiClient();
+    vi.mocked(apiClient.intakeMessage).mockResolvedValue({
+      requestId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      action: "fetch_context",
+      reason: "allowed_guild_mention",
+      contextFetchPlan: {
+        kind: "guild_recent",
+        limit: 1,
+        includeTriggerMessage: true,
+      },
+    });
+    vi.mocked(apiClient.requestResponse).mockResolvedValue({
+      requestId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      decision: {
+        shouldRespond: false,
+        reason: "trigger_message_not_selected",
+      },
+      replyChunks: [],
+      providerCallId: null,
+    });
+
+    await handleDiscordMessageCreate(
+      triggerMessage,
+      createClient(),
+      BASE_CONFIG,
+      apiClient,
+      createLogger(),
+    );
+
+    expect(apiClient.requestResponse).toHaveBeenCalled();
+    expect(triggerMessage.reply).not.toHaveBeenCalled();
+    expect(channel.send).not.toHaveBeenCalled();
   });
 
   it("sends a safe Japanese fallback when response generation fails", async () => {

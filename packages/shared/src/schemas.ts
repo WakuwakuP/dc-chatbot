@@ -33,6 +33,13 @@ export type RegisteredMemberStatus = v.InferOutput<
 export const ProviderKindSchema = v.picklist(["fake", "nvidia_nim"]);
 export type ProviderKind = v.InferOutput<typeof ProviderKindSchema>;
 
+export const ProviderCallStageSchema = v.picklist([
+  "context_selection",
+  "response_decision",
+  "response_generation",
+]);
+export type ProviderCallStage = v.InferOutput<typeof ProviderCallStageSchema>;
+
 export const SafeProviderErrorCategorySchema = v.picklist([
   "not_configured",
   "authentication_failed",
@@ -547,10 +554,30 @@ export const BotRespondRequestSchema = v.object({
 });
 export type BotRespondRequest = v.InferOutput<typeof BotRespondRequestSchema>;
 
+export const FinalResponseDecisionReasonSchema = v.picklist([
+  "dm_allowed",
+  "selected_context_available",
+  "trigger_message_not_selected",
+  "no_selected_context",
+  "automated_trigger_source",
+]);
+export type FinalResponseDecisionReason = v.InferOutput<
+  typeof FinalResponseDecisionReasonSchema
+>;
+
+export const FinalResponseDecisionSchema = v.object({
+  shouldRespond: v.boolean(),
+  reason: FinalResponseDecisionReasonSchema,
+});
+export type FinalResponseDecision = v.InferOutput<
+  typeof FinalResponseDecisionSchema
+>;
+
 export const BotRespondResponseSchema = v.object({
   requestId: UlidSchema,
+  decision: FinalResponseDecisionSchema,
   replyChunks: v.array(v.pipe(v.string(), v.minLength(1), v.maxLength(2000))),
-  providerCallId: UlidSchema,
+  providerCallId: v.optional(v.union([UlidSchema, v.null()])),
 });
 export type BotRespondResponse = v.InferOutput<typeof BotRespondResponseSchema>;
 

@@ -591,6 +591,9 @@ export async function handleDiscordMessageCreate(
 
     try {
       const response = await apiClient.requestResponse(responseRequest);
+      if (response.decision?.shouldRespond === false) {
+        return;
+      }
       await sendReplyChunks(message, response.replyChunks);
     } catch {
       if (!shouldAvoidAutomatedReply) {

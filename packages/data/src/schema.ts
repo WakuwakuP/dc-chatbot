@@ -97,6 +97,9 @@ export const providerCallAuditMetadata = sqliteTable(
     }).notNull(),
     providerRef: text("provider_ref").notNull(),
     model: text("model").notNull(),
+    providerCallStage: text("provider_call_stage", {
+      enum: ["context_selection", "response_decision", "response_generation"],
+    }).notNull(),
     status: text("status", {
       enum: ["started", "completed", "failed"],
     }).notNull(),
@@ -110,6 +113,10 @@ export const providerCallAuditMetadata = sqliteTable(
     index("provider_call_request_idx").on(table.requestId),
     index("provider_call_kind_created_idx").on(
       table.providerKind,
+      table.createdAt,
+    ),
+    index("provider_call_stage_created_idx").on(
+      table.providerCallStage,
       table.createdAt,
     ),
   ],

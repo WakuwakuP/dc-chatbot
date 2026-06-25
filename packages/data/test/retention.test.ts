@@ -109,6 +109,7 @@ describe("D1DcChatbotRepository role-scoped mutations", () => {
       providerKind: "nvidia_nim",
       providerRef: "deployment",
       model: "meta/llama-3.1-8b-instruct",
+      providerCallStage: "response_generation",
       status: "failed",
       safeErrorCategory: "authentication_failed",
       durationMs: 250,
@@ -121,9 +122,11 @@ describe("D1DcChatbotRepository role-scoped mutations", () => {
     );
     expect(insert?.sql).toContain("provider_kind");
     expect(insert?.sql).toContain("provider_ref");
+    expect(insert?.sql).toContain("provider_call_stage");
     expect(insert?.sql).not.toContain("connection_id");
     expect(insert?.bindings).toContain("nvidia_nim");
     expect(insert?.bindings).toContain("deployment");
+    expect(insert?.bindings).toContain("response_generation");
     expect(insert?.bindings).toContain("authentication_failed");
     const boundValues = db.statements.flatMap((item) => item.bindings);
     expect(boundValues).not.toContain("forbidden-provider-secret-marker");

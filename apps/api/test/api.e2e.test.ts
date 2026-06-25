@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import worker, { type Env } from "../src/worker";
+import worker, { runScheduledCleanup, type Env } from "../src/worker";
 
 const LOCAL_AUTH_BYPASS_SECRET = "local-auth-bypass-secret";
 const ULID_REGEX = /^[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -165,6 +165,12 @@ class FakeD1Statement {
   async run(): Promise<{ meta: { changes: number } }> {
     this.db.calls.push({ sql: this.sql, bindings: this.bindings });
     if (
+      this.db.failRunSqlFragment &&
+      this.sql.includes(this.db.failRunSqlFragment)
+    ) {
+      throw new Error("safe-test-d1-failure");
+    }
+    if (
       this.sql.includes("UPDATE owner_notifications") &&
       this.sql.includes("status = 'delivery_requested'")
     ) {
@@ -224,6 +230,7 @@ class FakeD1Database {
   readonly allowedOwnerDiscordUserIds: Set<string>;
   readonly activeAutomatedSourceDiscordUserIds: Set<string>;
   readonly pendingOwnerNotifications: FakeOwnerNotificationRow[];
+  failRunSqlFragment: string | null = null;
 
   constructor(
     allowedOwnerDiscordUserIds: readonly string[] = [],
@@ -266,6 +273,64 @@ function expectNoDbBindingString(
 }
 
 describe("API Worker routes", () => {
+  it("records one cleanup run metadata row with completed final status", async () => {
+    const db = new FakeD1Database();
+
+    await runScheduledCleanup(
+      { ...env, DB: db as unknown as D1Database },
+      "2026-06-20T00:00:00.000Z",
+    );
+
+    const inserts = dbCallsContaining(db, "INSERT INTO cleanup_run_metadata");
+    const updates = dbCallsContaining(db, "UPDATE cleanup_run_metadata");
+    expect(inserts).toHaveLength(1);
+    expect(updates).toHaveLength(1);
+    expect(inserts[0]?.bindings[0]).toMatch(ULID_REGEX);
+    expect(inserts[0]?.bindings.slice(1)).toEqual([
+      "started",
+      "2026-06-20T00:00:00.000Z",
+      null,
+      0,
+      null,
+      "2027-06-20T00:00:00.000Z",
+    ]);
+    expect(updates[0]?.bindings).toEqual([
+      "completed",
+      expect.any(String),
+      8,
+      null,
+      expect.any(String),
+      inserts[0]?.bindings[0],
+    ]);
+    expect(dbBindingStrings(db)).not.toContain(
+      "forbidden-cleanup-error-message",
+    );
+  });
+
+  it("updates the same cleanup run metadata row with failed safe status", async () => {
+    const db = new FakeD1Database();
+    db.failRunSqlFragment = "DELETE FROM owner_notifications";
+
+    await runScheduledCleanup(
+      { ...env, DB: db as unknown as D1Database },
+      "2026-06-20T00:00:00.000Z",
+    );
+
+    const inserts = dbCallsContaining(db, "INSERT INTO cleanup_run_metadata");
+    const updates = dbCallsContaining(db, "UPDATE cleanup_run_metadata");
+    expect(inserts).toHaveLength(1);
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.bindings).toEqual([
+      "failed",
+      expect.any(String),
+      4,
+      "cleanup_failed",
+      expect.any(String),
+      inserts[0]?.bindings[0],
+    ]);
+    expect(dbBindingStrings(db)).not.toContain("safe-test-d1-failure");
+  });
+
   it("serves health", async () => {
     const response = await worker.fetch(
       new Request("https://api.test/health"),

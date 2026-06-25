@@ -165,6 +165,33 @@ describe("D1DcChatbotRepository role-scoped mutations", () => {
     ]);
   });
 
+  it("updates cleanup run metadata by stable run ID", async () => {
+    const db = new RecordingD1Database();
+    const repository = new D1DcChatbotRepository(db as unknown as D1Database);
+
+    await repository.updateCleanupRunMetadata({
+      cleanupRunId: "01HY0000000000000000000004",
+      status: "completed",
+      finishedAt: "2026-06-20T00:01:00.000Z",
+      deletedRowCount: 7,
+      safeErrorCategory: null,
+      retainUntil: "2027-06-20T00:01:00.000Z",
+    });
+
+    const update = db.statements.find((item) =>
+      item.sql.includes("UPDATE cleanup_run_metadata"),
+    );
+    expect(update?.sql).toContain("WHERE cleanup_run_id = ?");
+    expect(update?.bindings).toEqual([
+      "completed",
+      "2026-06-20T00:01:00.000Z",
+      7,
+      null,
+      "2027-06-20T00:01:00.000Z",
+      "01HY0000000000000000000004",
+    ]);
+  });
+
   it("returns default provider config metadata without credential assumptions", async () => {
     const db = new RecordingD1Database();
     const repository = new D1DcChatbotRepository(db as unknown as D1Database);

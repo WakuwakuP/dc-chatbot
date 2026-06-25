@@ -242,6 +242,15 @@ export type InsertCleanupRunMetadataInput = {
   retainUntil: string;
 };
 
+export type UpdateCleanupRunMetadataInput = {
+  cleanupRunId: string;
+  status: "completed" | "failed";
+  finishedAt: string;
+  deletedRowCount: number;
+  safeErrorCategory: string | null;
+  retainUntil: string;
+};
+
 type OwnerRow = {
   owner_discord_user_id: string;
   role: OwnerRole;
@@ -1922,6 +1931,31 @@ export class D1DcChatbotRepository {
         input.retainUntil,
       )
       .run();
+  }
+
+  async updateCleanupRunMetadata(
+    input: UpdateCleanupRunMetadataInput,
+  ): Promise<boolean> {
+    const result = await this.db
+      .prepare(
+        `UPDATE cleanup_run_metadata
+         SET status = ?,
+             finished_at = ?,
+             deleted_row_count = ?,
+             safe_error_category = ?,
+             retain_until = ?
+         WHERE cleanup_run_id = ?`,
+      )
+      .bind(
+        input.status,
+        input.finishedAt,
+        input.deletedRowCount,
+        input.safeErrorCategory,
+        input.retainUntil,
+        input.cleanupRunId,
+      )
+      .run();
+    return (result.meta.changes ?? 0) > 0;
   }
 }
 

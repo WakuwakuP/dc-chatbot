@@ -1877,10 +1877,9 @@ export async function runScheduledCleanup(
       deletedRowCount += result.meta.changes ?? 0;
     }
     const finishedAt = new Date().toISOString();
-    await repository.insertCleanupRunMetadata({
-      cleanupRunId: createUlid(),
+    await repository.updateCleanupRunMetadata({
+      cleanupRunId,
       status: "completed",
-      startedAt: nowIsoUtc,
       finishedAt,
       deletedRowCount,
       safeErrorCategory: null,
@@ -1888,10 +1887,9 @@ export async function runScheduledCleanup(
     });
   } catch {
     const finishedAt = new Date().toISOString();
-    await repository.insertCleanupRunMetadata({
-      cleanupRunId: createUlid(),
+    await repository.updateCleanupRunMetadata({
+      cleanupRunId,
       status: "failed",
-      startedAt: nowIsoUtc,
       finishedAt,
       deletedRowCount,
       safeErrorCategory: "cleanup_failed",

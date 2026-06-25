@@ -8,6 +8,19 @@ export type OwnerNotificationStatus =
   | "suppressed";
 export type AutomatedTriggerSourceStatus = "active" | "disabled";
 export type AutomatedTriggerReplyMode = "reply" | "channel_message" | "none";
+export type ProviderKind = "fake" | "nvidia_nim";
+export type ConfiguredProviderAccessStatus =
+  | "available"
+  | "not_configured"
+  | "unavailable";
+export type SafeProviderErrorCategory =
+  | "not_configured"
+  | "authentication_failed"
+  | "rate_limited"
+  | "temporary_unavailable"
+  | "policy_rejected"
+  | "invalid_response"
+  | "unknown";
 
 export type OwnerRecord = {
   ownerDiscordUserId: string;
@@ -29,17 +42,22 @@ export type AllowedDiscordUserRecord =
       assignedOwnerDiscordUserId: string;
     };
 
-export type InsertProviderCallAuditInput = {
+type InsertProviderCallAuditBaseInput = {
   providerCallId: string;
   requestId: string;
-  providerRef: string;
   model: string;
   status: "started" | "completed" | "failed";
-  safeErrorCategory: string | null;
+  safeErrorCategory: SafeProviderErrorCategory | null;
   durationMs: number | null;
   createdAt: string;
   retainUntil: string;
 };
+
+export type InsertProviderCallAuditInput = InsertProviderCallAuditBaseInput &
+  (
+    | { providerKind: "nvidia_nim"; providerRef?: "deployment" }
+    | { providerKind?: "fake"; providerRef: string }
+  );
 
 export type UpsertDiscordUserInput = {
   discordUserId: string;
@@ -116,6 +134,19 @@ export type ModelSettingsRecord = {
   updatedAt: string;
 };
 
+export type ConfiguredProviderAccessMetadataRecord = {
+  status: ConfiguredProviderAccessStatus;
+  checkedAt: string | null;
+  safeErrorCategory: SafeProviderErrorCategory | null;
+};
+
+export type ProviderConfigMetadataRecord = {
+  providerKind: ProviderKind;
+  configuredProviderAccess: ConfiguredProviderAccessMetadataRecord;
+  modelSettings: ModelSettingsRecord;
+  updatedAt: string;
+};
+
 export type PromptSettingsMetadataRecord = {
   promptSettingId: string;
   promptKey: string;
@@ -128,6 +159,7 @@ export type PromptSettingsMetadataRecord = {
 export type OwnerSettingsRecord = {
   botSettings: BotSettingsRecord;
   modelSettings: ModelSettingsRecord;
+  providerConfig: ProviderConfigMetadataRecord;
   promptSettings: PromptSettingsMetadataRecord[];
 };
 
@@ -202,6 +234,15 @@ type ModelSettingsRow = {
   context_selection_model: string;
   response_decision_model: string;
   response_generation_model: string;
+  updated_at: string;
+};
+
+type ProviderSettingsRow = {
+  provider_kind: ProviderKind;
+  configured_provider_access_status: ConfiguredProviderAccessStatus;
+  configured_provider_access_checked_at: string | null;
+  safe_error_category: SafeProviderErrorCategory | null;
+  model_settings_id: string;
   updated_at: string;
 };
 
@@ -295,6 +336,57 @@ function mapOwnerNotification(
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function defaultModelSettings(nowIsoUtc: string): ModelSettingsRecord {
+  return {
+    contextSelectionModel: "fake-context-selection",
+    responseDecisionModel: "fake-response-decision",
+    responseGenerationModel: "fake-response-generation",
+    updatedAt: nowIsoUtc,
+  };
+}
+
+function mapModelSettings(
+  row: ModelSettingsRow | null | undefined,
+  nowIsoUtc: string,
+): ModelSettingsRecord {
+  return row
+    ? {
+        contextSelectionModel: row.context_selection_model,
+        responseDecisionModel: row.response_decision_model,
+        responseGenerationModel: row.response_generation_model,
+        updatedAt: row.updated_at,
+      }
+    : defaultModelSettings(nowIsoUtc);
+}
+
+function mapProviderConfig(
+  row: ProviderSettingsRow | null | undefined,
+  modelSettings: ModelSettingsRecord,
+  nowIsoUtc: string,
+): ProviderConfigMetadataRecord {
+  return row
+    ? {
+        providerKind: row.provider_kind,
+        configuredProviderAccess: {
+          status: row.configured_provider_access_status,
+          checkedAt: row.configured_provider_access_checked_at,
+          safeErrorCategory: row.safe_error_category,
+        },
+        modelSettings,
+        updatedAt: row.updated_at,
+      }
+    : {
+        providerKind: "fake",
+        configuredProviderAccess: {
+          status: "available",
+          checkedAt: null,
+          safeErrorCategory: null,
+        },
+        modelSettings,
+        updatedAt: nowIsoUtc,
+      };
 }
 
 async function allRows<T>(statement: D1PreparedStatement): Promise<T[]> {
@@ -482,6 +574,7 @@ export class D1DcChatbotRepository {
         `INSERT INTO provider_call_audit_metadata (
            provider_call_id,
            request_id,
+           provider_kind,
            provider_ref,
            model,
            status,
@@ -489,12 +582,13 @@ export class D1DcChatbotRepository {
            duration_ms,
            created_at,
            retain_until
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         input.providerCallId,
         input.requestId,
-        input.providerRef,
+        input.providerKind ?? "fake",
+        input.providerRef ?? "deployment",
         input.model,
         input.status,
         input.safeErrorCategory,
@@ -775,6 +869,47 @@ export class D1DcChatbotRepository {
     return member;
   }
 
+  private async readModelSettings(
+    nowIsoUtc: string,
+  ): Promise<ModelSettingsRecord> {
+    const row = await this.db
+      .prepare(
+        `SELECT context_selection_model,
+                response_decision_model,
+                response_generation_model,
+                updated_at
+         FROM model_settings
+         WHERE settings_id = 'singleton'
+         LIMIT 1`,
+      )
+      .first<ModelSettingsRow>();
+    return mapModelSettings(row, nowIsoUtc);
+  }
+
+  private async readProviderSettings(): Promise<ProviderSettingsRow | null> {
+    return this.db
+      .prepare(
+        `SELECT provider_kind,
+                configured_provider_access_status,
+                configured_provider_access_checked_at,
+                safe_error_category,
+                model_settings_id,
+                updated_at
+         FROM provider_settings
+         WHERE settings_id = 'singleton'
+         LIMIT 1`,
+      )
+      .first<ProviderSettingsRow>();
+  }
+
+  async getProviderConfigMetadata(
+    nowIsoUtc: string,
+  ): Promise<ProviderConfigMetadataRecord> {
+    const modelSettings = await this.readModelSettings(nowIsoUtc);
+    const providerSettings = await this.readProviderSettings();
+    return mapProviderConfig(providerSettings, modelSettings, nowIsoUtc);
+  }
+
   async getOwnerSettings(nowIsoUtc: string): Promise<OwnerSettingsRecord> {
     const botSettings = await this.db
       .prepare(
@@ -786,17 +921,8 @@ export class D1DcChatbotRepository {
          LIMIT 1`,
       )
       .first<BotSettingsRow>();
-    const modelSettings = await this.db
-      .prepare(
-        `SELECT context_selection_model,
-                response_decision_model,
-                response_generation_model,
-                updated_at
-         FROM model_settings
-         WHERE settings_id = 'singleton'
-         LIMIT 1`,
-      )
-      .first<ModelSettingsRow>();
+    const modelSettings = await this.readModelSettings(nowIsoUtc);
+    const providerSettings = await this.readProviderSettings();
     const promptRows = await allRows<PromptSettingsRow>(
       this.db.prepare(
         `SELECT ps.prompt_setting_id,
@@ -826,19 +952,12 @@ export class D1DcChatbotRepository {
             automatedTriggerDefaultCooldownSeconds: 60,
             updatedAt: nowIsoUtc,
           },
-      modelSettings: modelSettings
-        ? {
-            contextSelectionModel: modelSettings.context_selection_model,
-            responseDecisionModel: modelSettings.response_decision_model,
-            responseGenerationModel: modelSettings.response_generation_model,
-            updatedAt: modelSettings.updated_at,
-          }
-        : {
-            contextSelectionModel: "fake-context-selection",
-            responseDecisionModel: "fake-response-decision",
-            responseGenerationModel: "fake-response-generation",
-            updatedAt: nowIsoUtc,
-          },
+      modelSettings,
+      providerConfig: mapProviderConfig(
+        providerSettings,
+        modelSettings,
+        nowIsoUtc,
+      ),
       promptSettings: promptRows.map((row) => ({
         promptSettingId: row.prompt_setting_id,
         promptKey: row.prompt_key,
@@ -908,6 +1027,46 @@ export class D1DcChatbotRepository {
         input.contextSelectionModel,
         input.responseDecisionModel,
         input.responseGenerationModel,
+        input.nowIsoUtc,
+        input.nowIsoUtc,
+      )
+      .run();
+  }
+
+  async upsertProviderConfigMetadata(input: {
+    providerKind: ProviderKind;
+    configuredProviderAccessStatus: ConfiguredProviderAccessStatus;
+    checkedAt: string | null;
+    safeErrorCategory: SafeProviderErrorCategory | null;
+    modelSettingsId?: string;
+    nowIsoUtc: string;
+  }): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO provider_settings (
+           settings_id,
+           provider_kind,
+           configured_provider_access_status,
+           configured_provider_access_checked_at,
+           safe_error_category,
+           model_settings_id,
+           created_at,
+           updated_at
+         ) VALUES ('singleton', ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(settings_id) DO UPDATE SET
+           provider_kind = excluded.provider_kind,
+           configured_provider_access_status = excluded.configured_provider_access_status,
+           configured_provider_access_checked_at = excluded.configured_provider_access_checked_at,
+           safe_error_category = excluded.safe_error_category,
+           model_settings_id = excluded.model_settings_id,
+           updated_at = excluded.updated_at`,
+      )
+      .bind(
+        input.providerKind,
+        input.configuredProviderAccessStatus,
+        input.checkedAt,
+        input.safeErrorCategory,
+        input.modelSettingsId ?? "singleton",
         input.nowIsoUtc,
         input.nowIsoUtc,
       )

@@ -92,6 +92,9 @@ export const providerCallAuditMetadata = sqliteTable(
   {
     providerCallId: text("provider_call_id").primaryKey(),
     requestId: text("request_id").notNull(),
+    providerKind: text("provider_kind", {
+      enum: ["fake", "nvidia_nim"],
+    }).notNull(),
     providerRef: text("provider_ref").notNull(),
     model: text("model").notNull(),
     status: text("status", {
@@ -105,6 +108,46 @@ export const providerCallAuditMetadata = sqliteTable(
   (table) => [
     index("provider_call_retain_until_idx").on(table.retainUntil),
     index("provider_call_request_idx").on(table.requestId),
+    index("provider_call_kind_created_idx").on(
+      table.providerKind,
+      table.createdAt,
+    ),
+  ],
+);
+
+export const providerSettings = sqliteTable(
+  "provider_settings",
+  {
+    settingsId: text("settings_id").primaryKey(),
+    providerKind: text("provider_kind", {
+      enum: ["fake", "nvidia_nim"],
+    }).notNull(),
+    configuredProviderAccessStatus: text("configured_provider_access_status", {
+      enum: ["available", "not_configured", "unavailable"],
+    }).notNull(),
+    configuredProviderAccessCheckedAt: text(
+      "configured_provider_access_checked_at",
+    ),
+    safeErrorCategory: text("safe_error_category", {
+      enum: [
+        "not_configured",
+        "authentication_failed",
+        "rate_limited",
+        "temporary_unavailable",
+        "policy_rejected",
+        "invalid_response",
+        "unknown",
+      ],
+    }),
+    modelSettingsId: text("model_settings_id").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    index("provider_settings_kind_status_idx").on(
+      table.providerKind,
+      table.configuredProviderAccessStatus,
+    ),
   ],
 );
 

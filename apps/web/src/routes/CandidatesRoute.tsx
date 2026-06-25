@@ -67,7 +67,7 @@ export function CandidatesRoute() {
     } catch (promoteError) {
       if (isNotFoundProblem(promoteError)) {
         setActionMessage(
-          "promote API はまだ利用できません。backend 実装後に有効になります。",
+          "Promote 対象の Candidate Discord User が見つかりませんでした。",
         );
         return;
       }
@@ -89,7 +89,7 @@ export function CandidatesRoute() {
 
       {isUnavailable ? (
         <UnavailableNotice>
-          /api/v1/owner/candidates はまだ利用できません。
+          Candidate Discord User list を取得できませんでした。
         </UnavailableNotice>
       ) : null}
       {error ? <ProblemNotice error={error} /> : null}
@@ -106,7 +106,7 @@ export function CandidatesRoute() {
           {!isLoading && candidates.length === 0 ? (
             <EmptyState
               title="Candidate Discord User はありません"
-              description="最近観測された non-allowed user metadata がない、または backend route が未実装です。"
+              description="最近観測された non-allowed user metadata はありません。"
             />
           ) : null}
           {candidates.length > 0 ? (
@@ -116,9 +116,11 @@ export function CandidatesRoute() {
                   <tr>
                     <th className="py-2 pr-3">Candidate Discord User ID</th>
                     <th className="py-2 pr-3">表示名 snapshot</th>
-                    <th className="py-2 pr-3">observed</th>
+                    <th className="py-2 pr-3">first observed</th>
+                    <th className="py-2 pr-3">last observed</th>
                     <th className="py-2 pr-3">expires</th>
                     <th className="py-2 pr-3">guild</th>
+                    <th className="py-2 pr-3">channel</th>
                     <th className="py-2 pr-3">操作</th>
                   </tr>
                 </thead>
@@ -135,13 +137,19 @@ export function CandidatesRoute() {
                         {candidate.displayNameSnapshot ?? "未提供"}
                       </td>
                       <td className="py-2 pr-3">
-                        {candidate.observedAt ?? "未提供"}
+                        {candidate.firstObservedAt || "未提供"}
                       </td>
                       <td className="py-2 pr-3">
-                        {candidate.expiresAt ?? "未提供"}
+                        {candidate.lastObservedAt || "未提供"}
+                      </td>
+                      <td className="py-2 pr-3">
+                        {candidate.expiresAt || "未提供"}
                       </td>
                       <td className="py-2 pr-3">
                         {candidate.observedInGuildId ?? "DM / 未提供"}
+                      </td>
+                      <td className="py-2 pr-3">
+                        {candidate.observedInChannelId ?? "未提供"}
                       </td>
                       <td className="py-2 pr-3">
                         <Button

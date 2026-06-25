@@ -11,13 +11,78 @@ import {
   asOwnerProblem,
   EmptyState,
   ProblemNotice,
-  StatusPill,
   UnavailableNotice,
 } from "./routeState";
+
+type BotSettingsForm = {
+  notificationOwnerDiscordUserId: string;
+  automatedTriggerDefaultCooldownSeconds: string;
+};
+
+type ModelSettingsForm = {
+  contextSelectionModel: string;
+  responseDecisionModel: string;
+  responseGenerationModel: string;
+};
+
+type PromptMetadataForm = {
+  promptKey: string;
+  promptBodySha256: string;
+  promptBodyLength: string;
+  label: string;
+};
+
+const emptyBotForm: BotSettingsForm = {
+  notificationOwnerDiscordUserId: "",
+  automatedTriggerDefaultCooldownSeconds: "60",
+};
+
+const emptyModelForm: ModelSettingsForm = {
+  contextSelectionModel: "",
+  responseDecisionModel: "",
+  responseGenerationModel: "",
+};
+
+const emptyPromptForm: PromptMetadataForm = {
+  promptKey: "",
+  promptBodySha256: "",
+  promptBodyLength: "",
+  label: "",
+};
+
+function botFormFromSettings(settings: OwnerSettings): BotSettingsForm {
+  return {
+    notificationOwnerDiscordUserId:
+      settings.botSettings.notificationOwnerDiscordUserId ?? "",
+    automatedTriggerDefaultCooldownSeconds: String(
+      settings.botSettings.automatedTriggerDefaultCooldownSeconds,
+    ),
+  };
+}
+
+function modelFormFromSettings(settings: OwnerSettings): ModelSettingsForm {
+  return {
+    contextSelectionModel: settings.modelSettings.contextSelectionModel,
+    responseDecisionModel: settings.modelSettings.responseDecisionModel,
+    responseGenerationModel: settings.modelSettings.responseGenerationModel,
+  };
+}
+
+function parseOptionalNumber(value: string): number | undefined {
+  if (!value.trim()) {
+    return undefined;
+  }
+  return Number(value);
+}
 
 export function SettingsRoute() {
   const { canManageOwnerSettings, ownerStatus } = useOwnerLayout();
   const [settings, setSettings] = useState<OwnerSettings | null>(null);
+  const [botForm, setBotForm] = useState<BotSettingsForm>(emptyBotForm);
+  const [modelForm, setModelForm] =
+    useState<ModelSettingsForm>(emptyModelForm);
+  const [promptForm, setPromptForm] =
+    useState<PromptMetadataForm>(emptyPromptForm);
   const [isLoading, setIsLoading] = useState(true);
   const [isUnavailable, setIsUnavailable] = useState(false);
   const [error, setError] = useState<ReturnType<typeof asOwnerProblem>>(null);
@@ -31,7 +96,11 @@ export function SettingsRoute() {
 
     ownerApi
       .getSettings({ signal: controller.signal })
-      .then((nextSettings) => setSettings(nextSettings))
+      .then((nextSettings) => {
+        setSettings(nextSettings);
+        setBotForm(botFormFromSettings(nextSettings));
+        setModelForm(modelFormFromSettings(nextSettings));
+      })
       .catch((settingsError: unknown) => {
         if (controller.signal.aborted) {
           return;
@@ -52,24 +121,56 @@ export function SettingsRoute() {
     return () => controller.abort();
   }, []);
 
-  async function saveSettings() {
+  async function saveBotSettings() {
     setActionMessage(null);
     setError(null);
     try {
-      const nextSettings = await ownerApi.updateSettings({
-        model: settings?.model ?? null,
-        contextMessageLimit: settings?.contextMessageLimit ?? null,
-        ownerNotificationsEnabled: settings?.ownerNotificationsEnabled ?? null,
+      const nextSettings = await ownerApi.updateBotSettings({
+        notificationOwnerDiscordUserId:
+          botForm.notificationOwnerDiscordUserId.trim() || null,
+        automatedTriggerDefaultCooldownSeconds: parseOptionalNumber(
+          botForm.automatedTriggerDefaultCooldownSeconds,
+        ),
       });
       setSettings(nextSettings);
-      setActionMessage("Settings の保存リクエストを送信しました。");
+      setBotForm(botFormFromSettings(nextSettings));
+      setActionMessage("Bot settings metadata を保存しました。");
     } catch (saveError) {
-      if (isNotFoundProblem(saveError)) {
-        setActionMessage(
-          "settings 更新 API はまだ利用できません。backend 実装後に有効になります。",
-        );
-        return;
-      }
+      setError(asOwnerProblem(saveError));
+    }
+  }
+
+  async function saveModelSettings() {
+    setActionMessage(null);
+    setError(null);
+    try {
+      const nextSettings = await ownerApi.updateModelSettings({
+        contextSelectionModel: modelForm.contextSelectionModel.trim(),
+        responseDecisionModel: modelForm.responseDecisionModel.trim(),
+        responseGenerationModel: modelForm.responseGenerationModel.trim(),
+      });
+      setSettings(nextSettings);
+      setModelForm(modelFormFromSettings(nextSettings));
+      setActionMessage("Model settings metadata を保存しました。");
+    } catch (saveError) {
+      setError(asOwnerProblem(saveError));
+    }
+  }
+
+  async function savePromptMetadata() {
+    setActionMessage(null);
+    setError(null);
+    try {
+      const nextSettings = await ownerApi.updatePromptSettingsMetadata({
+        promptKey: promptForm.promptKey.trim(),
+        promptBodySha256: promptForm.promptBodySha256.trim(),
+        promptBodyLength: Number(promptForm.promptBodyLength),
+        ...(promptForm.label.trim() ? { label: promptForm.label.trim() } : {}),
+      });
+      setSettings(nextSettings);
+      setPromptForm(emptyPromptForm);
+      setActionMessage("Prompt settings metadata を保存しました。");
+    } catch (saveError) {
       setError(asOwnerProblem(saveError));
     }
   }
@@ -81,8 +182,8 @@ export function SettingsRoute() {
       <div>
         <h2 className="text-2xl font-semibold tracking-tight">Settings</h2>
         <p className="mt-1 text-sm text-muted">
-          model settings と prompt settings metadata を管理します。prompt body
-          は表示・保持しません。
+          bot settings、model settings、prompt settings metadata を管理します。
+          prompt body は表示・保持しません。
         </p>
       </div>
 
@@ -94,7 +195,7 @@ export function SettingsRoute() {
       ) : null}
       {isUnavailable ? (
         <UnavailableNotice>
-          /api/v1/owner/settings はまだ利用できません。
+          Settings metadata を取得できませんでした。
         </UnavailableNotice>
       ) : null}
       {error ? <ProblemNotice error={error} /> : null}
@@ -105,118 +206,251 @@ export function SettingsRoute() {
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Model settings</CardTitle>
+            <CardTitle>Bot settings</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             {isLoading ? <p>読み込み中です。</p> : null}
             <label className="block space-y-1 text-sm">
-              <span className="font-medium text-foreground">既定 model</span>
+              <span className="font-medium text-foreground">
+                Notification Owner Discord User ID
+              </span>
               <input
                 className="w-full rounded-md border border-border bg-white px-3 py-2 text-foreground disabled:cursor-not-allowed disabled:opacity-60"
-                value={settings?.model ?? ""}
+                value={botForm.notificationOwnerDiscordUserId}
                 onChange={(event) =>
-                  setSettings((current) => ({
-                    model: event.target.value,
-                    contextMessageLimit: current?.contextMessageLimit ?? null,
-                    ownerNotificationsEnabled:
-                      current?.ownerNotificationsEnabled ?? null,
-                    promptSettingsUpdatedAt:
-                      current?.promptSettingsUpdatedAt ?? null,
-                    warnings: current?.warnings ?? [],
+                  setBotForm((current) => ({
+                    ...current,
+                    notificationOwnerDiscordUserId: event.target.value,
                   }))
                 }
                 disabled={disabled}
-                placeholder="API が返す model metadata"
+                placeholder="未設定なら空欄"
               />
             </label>
             <label className="block space-y-1 text-sm">
               <span className="font-medium text-foreground">
-                Conversation Context message limit
+                Automated Trigger default cooldown seconds
               </span>
               <input
                 className="w-full rounded-md border border-border bg-white px-3 py-2 text-foreground disabled:cursor-not-allowed disabled:opacity-60"
                 type="number"
-                value={settings?.contextMessageLimit ?? ""}
+                min={10}
+                max={3600}
+                value={botForm.automatedTriggerDefaultCooldownSeconds}
                 onChange={(event) =>
-                  setSettings((current) => ({
-                    model: current?.model ?? null,
-                    contextMessageLimit: event.target.value
-                      ? Number(event.target.value)
-                      : null,
-                    ownerNotificationsEnabled:
-                      current?.ownerNotificationsEnabled ?? null,
-                    promptSettingsUpdatedAt:
-                      current?.promptSettingsUpdatedAt ?? null,
-                    warnings: current?.warnings ?? [],
+                  setBotForm((current) => ({
+                    ...current,
+                    automatedTriggerDefaultCooldownSeconds: event.target.value,
                   }))
                 }
                 disabled={disabled}
-                placeholder="例: 30"
               />
             </label>
-            <Button type="button" onClick={saveSettings} disabled={disabled}>
-              Settings を保存
+            <p>updated: {settings?.botSettings.updatedAt || "未提供"}</p>
+            <Button type="button" onClick={saveBotSettings} disabled={disabled}>
+              Bot settings を保存
             </Button>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle>Prompt settings metadata</CardTitle>
+            <CardTitle>Model settings</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <p>
-              prompt body history は frontend state に保持しません。API
-              が返す場合も、ここでは更新日時などの metadata のみ扱います。
-            </p>
-            <p>
-              prompt settings updated:{" "}
-              {settings?.promptSettingsUpdatedAt ?? "API 未提供"}
-            </p>
-            <label className="flex items-center gap-2 text-sm text-foreground">
+            <label className="block space-y-1 text-sm">
+              <span className="font-medium text-foreground">
+                Context Selection model
+              </span>
               <input
-                type="checkbox"
-                checked={settings?.ownerNotificationsEnabled ?? false}
+                className="w-full rounded-md border border-border bg-white px-3 py-2 text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                value={modelForm.contextSelectionModel}
                 onChange={(event) =>
-                  setSettings((current) => ({
-                    model: current?.model ?? null,
-                    contextMessageLimit: current?.contextMessageLimit ?? null,
-                    ownerNotificationsEnabled: event.target.checked,
-                    promptSettingsUpdatedAt:
-                      current?.promptSettingsUpdatedAt ?? null,
-                    warnings: current?.warnings ?? [],
+                  setModelForm((current) => ({
+                    ...current,
+                    contextSelectionModel: event.target.value,
                   }))
                 }
                 disabled={disabled}
               />
-              Owner notification を有効化
             </label>
+            <label className="block space-y-1 text-sm">
+              <span className="font-medium text-foreground">
+                Response Decision model
+              </span>
+              <input
+                className="w-full rounded-md border border-border bg-white px-3 py-2 text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                value={modelForm.responseDecisionModel}
+                onChange={(event) =>
+                  setModelForm((current) => ({
+                    ...current,
+                    responseDecisionModel: event.target.value,
+                  }))
+                }
+                disabled={disabled}
+              />
+            </label>
+            <label className="block space-y-1 text-sm">
+              <span className="font-medium text-foreground">
+                Response Generation model
+              </span>
+              <input
+                className="w-full rounded-md border border-border bg-white px-3 py-2 text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                value={modelForm.responseGenerationModel}
+                onChange={(event) =>
+                  setModelForm((current) => ({
+                    ...current,
+                    responseGenerationModel: event.target.value,
+                  }))
+                }
+                disabled={disabled}
+              />
+            </label>
+            <Button
+              type="button"
+              onClick={saveModelSettings}
+              disabled={
+                disabled ||
+                !modelForm.contextSelectionModel ||
+                !modelForm.responseDecisionModel ||
+                !modelForm.responseGenerationModel
+              }
+            >
+              Model settings を保存
+            </Button>
           </CardContent>
         </Card>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Settings warnings</CardTitle>
+          <CardTitle>Prompt settings metadata</CardTitle>
         </CardHeader>
-        <CardContent>
-          {settings?.warnings.length ? (
-            <ul className="space-y-2">
-              {settings.warnings.map((warning) => (
-                <li
-                  key={warning.code}
-                  className="flex flex-wrap items-center gap-2"
-                >
-                  <StatusPill>{warning.severity}</StatusPill>
-                  <span className="text-foreground">{warning.title}</span>
-                  <span className="text-muted">({warning.code})</span>
-                </li>
-              ))}
-            </ul>
+        <CardContent className="space-y-4">
+          <p>
+            prompt body は frontend state に保持しません。sha256、body length、
+            version ID などの metadata のみ扱います。
+          </p>
+          <div className="grid gap-3 lg:grid-cols-4">
+            <label className="space-y-1 text-sm">
+              <span className="font-medium text-foreground">Prompt key</span>
+              <input
+                className="w-full rounded-md border border-border bg-white px-3 py-2 text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                value={promptForm.promptKey}
+                onChange={(event) =>
+                  setPromptForm((current) => ({
+                    ...current,
+                    promptKey: event.target.value,
+                  }))
+                }
+                disabled={disabled}
+              />
+            </label>
+            <label className="space-y-1 text-sm">
+              <span className="font-medium text-foreground">
+                Prompt body sha256
+              </span>
+              <input
+                className="w-full rounded-md border border-border bg-white px-3 py-2 text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                value={promptForm.promptBodySha256}
+                onChange={(event) =>
+                  setPromptForm((current) => ({
+                    ...current,
+                    promptBodySha256: event.target.value,
+                  }))
+                }
+                disabled={disabled}
+                placeholder="64 hex chars"
+              />
+            </label>
+            <label className="space-y-1 text-sm">
+              <span className="font-medium text-foreground">
+                Prompt body length
+              </span>
+              <input
+                className="w-full rounded-md border border-border bg-white px-3 py-2 text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                type="number"
+                min={0}
+                value={promptForm.promptBodyLength}
+                onChange={(event) =>
+                  setPromptForm((current) => ({
+                    ...current,
+                    promptBodyLength: event.target.value,
+                  }))
+                }
+                disabled={disabled}
+              />
+            </label>
+            <label className="space-y-1 text-sm">
+              <span className="font-medium text-foreground">Label</span>
+              <input
+                className="w-full rounded-md border border-border bg-white px-3 py-2 text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                value={promptForm.label}
+                onChange={(event) =>
+                  setPromptForm((current) => ({
+                    ...current,
+                    label: event.target.value,
+                  }))
+                }
+                disabled={disabled}
+              />
+            </label>
+          </div>
+          <Button
+            type="button"
+            onClick={savePromptMetadata}
+            disabled={
+              disabled ||
+              !promptForm.promptKey ||
+              !promptForm.promptBodySha256 ||
+              !promptForm.promptBodyLength
+            }
+          >
+            Prompt metadata を保存
+          </Button>
+
+          {settings?.promptSettings.length ? (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px] text-left text-sm">
+                <thead className="text-xs text-muted">
+                  <tr>
+                    <th className="py-2 pr-3">prompt key</th>
+                    <th className="py-2 pr-3">active version</th>
+                    <th className="py-2 pr-3">sha256</th>
+                    <th className="py-2 pr-3">length</th>
+                    <th className="py-2 pr-3">updated</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {settings.promptSettings.map((promptSetting) => (
+                    <tr
+                      key={promptSetting.promptSettingId}
+                      className="border-t border-border"
+                    >
+                      <td className="py-2 pr-3 text-foreground">
+                        {promptSetting.promptKey}
+                      </td>
+                      <td className="py-2 pr-3">
+                        {promptSetting.activeVersionId ?? "未提供"}
+                      </td>
+                      <td className="py-2 pr-3">
+                        {promptSetting.activePromptBodySha256 ?? "未提供"}
+                      </td>
+                      <td className="py-2 pr-3">
+                        {promptSetting.activePromptBodyLength ?? "未提供"}
+                      </td>
+                      <td className="py-2 pr-3">
+                        {promptSetting.updatedAt || "未提供"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           ) : (
             <EmptyState
-              title="settings warnings はありません"
-              description="API が警告 metadata を返した場合だけ表示します。"
+              title="Prompt settings metadata はありません"
+              description="登録済み prompt metadata がない状態です。"
             />
           )}
         </CardContent>

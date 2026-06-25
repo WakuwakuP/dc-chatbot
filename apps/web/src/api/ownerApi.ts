@@ -1,77 +1,37 @@
 import type {
+  AutomatedTriggerSourceItem,
+  CandidateDiscordUserItem,
+  CreateAutomatedTriggerSourceRequest,
+  ModelSettings,
+  OwnerDashboardSummaryResponse,
   OwnerMeResponse,
   OwnerRole,
+  OwnerSettingsResponse,
   ProblemDetails,
+  PromptSettingsMetadata,
+  RegisteredMemberItem,
+  UpdateAutomatedTriggerSourceRequest,
+  UpdateBotSettingsRequest,
+  UpdateModelSettingsRequest,
+  UpdatePromptSettingsMetadataRequest,
 } from "@dc-chatbot/shared";
 
-export type DashboardSummary = {
-  owner: {
-    ownerDiscordUserId: string;
-    role: OwnerRole;
-    managedMemberCount: number | null;
-  };
-  usage: {
-    periodLabel: string;
-    requestCount: number;
-    providerCallCount: number;
-    errorCount: number;
-    buckets: UsageBucket[];
-  };
-  recentErrors: RecentErrorMetadata[];
-  settingsWarnings: SettingsWarning[];
-};
-
-export type UsageBucket = {
-  label: string;
-  requestCount: number;
-  errorCount: number;
-};
-
-export type RecentErrorMetadata = {
-  id: string;
-  occurredAt: string;
-  surface: string;
-  category: string;
-  requestId: string | null;
-};
+export type DashboardSummary = OwnerDashboardSummaryResponse;
+export type RegisteredMember = RegisteredMemberItem;
+export type CandidateDiscordUser = CandidateDiscordUserItem;
+export type OwnerSettings = OwnerSettingsResponse;
+export type AutomatedTriggerSource = AutomatedTriggerSourceItem;
+export type CreateAutomatedTriggerSourceInput =
+  CreateAutomatedTriggerSourceRequest;
+export type UpdateAutomatedTriggerSourceInput =
+  UpdateAutomatedTriggerSourceRequest;
+export type UpdatePromptSettingsMetadataInput =
+  UpdatePromptSettingsMetadataRequest;
 
 export type SettingsWarning = {
   code: string;
   title: string;
   severity: "info" | "warning";
-};
-
-export type RegisteredMember = {
-  discordUserId: string;
-  displayNameSnapshot: string | null;
-  status: "active" | "disabled";
-  assignedOwnerDiscordUserId: string;
-  updatedAt: string | null;
-};
-
-export type CandidateDiscordUser = {
-  candidateDiscordUserId: string;
-  displayNameSnapshot: string | null;
-  observedAt: string | null;
-  expiresAt: string | null;
-  observedInGuildId: string | null;
-};
-
-export type OwnerSettings = {
-  model: string | null;
-  contextMessageLimit: number | null;
-  ownerNotificationsEnabled: boolean | null;
-  promptSettingsUpdatedAt: string | null;
-  warnings: SettingsWarning[];
-};
-
-export type AutomatedTriggerSource = {
-  id: string;
-  displayNameSnapshot: string | null;
-  status: "active" | "disabled";
-  replyMode: "mention" | "thread" | "dm" | "none" | null;
-  cooldownSeconds: number | null;
-  assignedOwnerDiscordUserId: string | null;
 };
 
 export type CreateRegisteredMemberInput = {
@@ -173,14 +133,6 @@ function readNumber(
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function readBoolean(
-  record: Record<string, unknown>,
-  key: string,
-): boolean | null {
-  const value = record[key];
-  return typeof value === "boolean" ? value : null;
-}
-
 function readArray(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? value.filter(isRecord) : [];
 }
@@ -198,19 +150,14 @@ function readSourceStatus(value: unknown): AutomatedTriggerSource["status"] {
 }
 
 function readReplyMode(value: unknown): AutomatedTriggerSource["replyMode"] {
-  if (
-    value === "mention" ||
-    value === "thread" ||
-    value === "dm" ||
-    value === "none"
-  ) {
-    return value;
-  }
-  return null;
+  return value === "channel_message" || value === "none" ? value : "reply";
 }
 
-function readSeverity(value: unknown): SettingsWarning["severity"] {
-  return value === "warning" ? "warning" : "info";
+function readNullableString(
+  record: Record<string, unknown>,
+  key: string,
+): string | null {
+  return readString(record, key);
 }
 
 function toProblemDetails(raw: unknown, status: number): ProblemDetails | null {
@@ -301,79 +248,54 @@ function mapOwnerMe(raw: unknown): OwnerMeResponse {
   };
 }
 
-function mapWarnings(raw: unknown): SettingsWarning[] {
-  return readArray(raw).map((warning, index) => ({
-    code: readString(warning, "code") ?? `warning_${index + 1}`,
-    title: readString(warning, "title") ?? "設定の確認が必要です",
-    severity: readSeverity(warning.severity),
-  }));
-}
-
-function mapUsageBuckets(raw: unknown): UsageBucket[] {
-  return readArray(raw).map((bucket, index) => ({
-    label: readString(bucket, "label") ?? `${index + 1}`,
-    requestCount: readNumber(bucket, "requestCount") ?? 0,
-    errorCount: readNumber(bucket, "errorCount") ?? 0,
-  }));
-}
-
 function mapDashboardSummary(raw: unknown): DashboardSummary {
   const record = isRecord(raw) ? raw : {};
-  const owner = isRecord(record.owner) ? record.owner : record;
-  const usage = isRecord(record.usage) ? record.usage : {};
+  const registeredMemberCounts = isRecord(record.registeredMemberCounts)
+    ? record.registeredMemberCounts
+    : {};
+  const automatedTriggerSourceCounts = isRecord(
+    record.automatedTriggerSourceCounts,
+  )
+    ? record.automatedTriggerSourceCounts
+    : {};
 
   return {
-    owner: {
-      ownerDiscordUserId: readString(owner, "ownerDiscordUserId") ?? "0",
-      role: readOwnerRole(owner.role),
-      managedMemberCount: readNumber(owner, "managedMemberCount"),
+    owner: mapOwnerMe(record.owner),
+    registeredMemberCounts: {
+      active: readNumber(registeredMemberCounts, "active") ?? 0,
+      disabled: readNumber(registeredMemberCounts, "disabled") ?? 0,
     },
-    usage: {
-      periodLabel: readString(usage, "periodLabel") ?? "直近30日",
-      requestCount: readNumber(usage, "requestCount") ?? 0,
-      providerCallCount: readNumber(usage, "providerCallCount") ?? 0,
-      errorCount: readNumber(usage, "errorCount") ?? 0,
-      buckets: mapUsageBuckets(usage.buckets),
+    candidateDiscordUserCount:
+      readNumber(record, "candidateDiscordUserCount") ?? 0,
+    pendingOwnerNotificationCount:
+      readNumber(record, "pendingOwnerNotificationCount") ?? 0,
+    automatedTriggerSourceCounts: {
+      active: readNumber(automatedTriggerSourceCounts, "active") ?? 0,
+      disabled: readNumber(automatedTriggerSourceCounts, "disabled") ?? 0,
     },
-    recentErrors: readArray(record.recentErrors).map((error, index) => ({
-      id: readString(error, "id") ?? `error_${index + 1}`,
-      occurredAt: readString(error, "occurredAt") ?? "",
-      surface: readString(error, "surface") ?? "owner_api",
-      category: readString(error, "category") ?? "unknown",
-      requestId: readString(error, "requestId"),
-    })),
-    settingsWarnings: mapWarnings(record.settingsWarnings),
   };
 }
 
 export function dashboardFromOwnerMe(owner: OwnerMeResponse): DashboardSummary {
   return {
-    owner: {
-      ownerDiscordUserId: owner.ownerDiscordUserId,
-      role: owner.role,
-      managedMemberCount: null,
-    },
-    usage: {
-      periodLabel: "直近30日",
-      requestCount: 0,
-      providerCallCount: 0,
-      errorCount: 0,
-      buckets: [],
-    },
-    recentErrors: [],
-    settingsWarnings: [],
+    owner,
+    registeredMemberCounts: { active: 0, disabled: 0 },
+    candidateDiscordUserCount: 0,
+    pendingOwnerNotificationCount: 0,
+    automatedTriggerSourceCounts: { active: 0, disabled: 0 },
   };
 }
 
 function mapRegisteredMembers(raw: unknown): RegisteredMember[] {
   const rows = isRecord(raw) && Array.isArray(raw.members) ? raw.members : raw;
   return readArray(rows).map((member) => ({
-    discordUserId: readString(member, "discordUserId") ?? "0",
-    displayNameSnapshot: readString(member, "displayNameSnapshot"),
+    memberDiscordUserId: readString(member, "memberDiscordUserId") ?? "0",
+    displayNameSnapshot: readNullableString(member, "displayNameSnapshot"),
     status: readMemberStatus(member.status),
     assignedOwnerDiscordUserId:
       readString(member, "assignedOwnerDiscordUserId") ?? "0",
-    updatedAt: readString(member, "updatedAt"),
+    createdAt: readString(member, "createdAt") ?? "",
+    updatedAt: readString(member, "updatedAt") ?? "",
   }));
 }
 
@@ -383,37 +305,94 @@ function mapCandidates(raw: unknown): CandidateDiscordUser[] {
   return readArray(rows).map((candidate) => ({
     candidateDiscordUserId:
       readString(candidate, "candidateDiscordUserId") ?? "0",
-    displayNameSnapshot: readString(candidate, "displayNameSnapshot"),
-    observedAt: readString(candidate, "observedAt"),
-    expiresAt: readString(candidate, "expiresAt"),
-    observedInGuildId: readString(candidate, "observedInGuildId"),
+    displayNameSnapshot: readNullableString(candidate, "displayNameSnapshot"),
+    observedInGuildId: readNullableString(candidate, "observedInGuildId"),
+    observedInChannelId: readNullableString(candidate, "observedInChannelId"),
+    firstObservedAt: readString(candidate, "firstObservedAt") ?? "",
+    lastObservedAt: readString(candidate, "lastObservedAt") ?? "",
+    expiresAt: readString(candidate, "expiresAt") ?? "",
   }));
+}
+
+function mapModelSettings(raw: unknown): ModelSettings {
+  const record = isRecord(raw) ? raw : {};
+  return {
+    contextSelectionModel: readString(record, "contextSelectionModel") ?? "",
+    responseDecisionModel: readString(record, "responseDecisionModel") ?? "",
+    responseGenerationModel:
+      readString(record, "responseGenerationModel") ?? "",
+  };
+}
+
+function mapPromptSetting(raw: Record<string, unknown>): PromptSettingsMetadata {
+  return {
+    promptSettingId: readString(raw, "promptSettingId") ?? "",
+    promptKey: readString(raw, "promptKey") ?? "",
+    activeVersionId: readNullableString(raw, "activeVersionId"),
+    activePromptBodySha256: readNullableString(
+      raw,
+      "activePromptBodySha256",
+    ),
+    activePromptBodyLength: readNumber(raw, "activePromptBodyLength"),
+    updatedAt: readString(raw, "updatedAt") ?? "",
+  };
 }
 
 function mapSettings(raw: unknown): OwnerSettings {
   const record = isRecord(raw) ? raw : {};
+  const botSettings = isRecord(record.botSettings) ? record.botSettings : {};
   return {
-    model: readString(record, "model"),
-    contextMessageLimit: readNumber(record, "contextMessageLimit"),
-    ownerNotificationsEnabled: readBoolean(record, "ownerNotificationsEnabled"),
-    promptSettingsUpdatedAt: readString(record, "promptSettingsUpdatedAt"),
-    warnings: mapWarnings(record.warnings),
+    botSettings: {
+      notificationOwnerDiscordUserId: readNullableString(
+        botSettings,
+        "notificationOwnerDiscordUserId",
+      ),
+      automatedTriggerDefaultCooldownSeconds:
+        readNumber(botSettings, "automatedTriggerDefaultCooldownSeconds") ?? 60,
+      updatedAt: readString(botSettings, "updatedAt") ?? "",
+    },
+    modelSettings: mapModelSettings(record.modelSettings),
+    promptSettings: readArray(record.promptSettings).map(mapPromptSetting),
   };
 }
 
 function mapAutomatedTriggerSources(raw: unknown): AutomatedTriggerSource[] {
-  const rows = isRecord(raw) && Array.isArray(raw.sources) ? raw.sources : raw;
+  const rows =
+    isRecord(raw) && Array.isArray(raw.automatedTriggerSources)
+      ? raw.automatedTriggerSources
+      : raw;
   return readArray(rows).map((source, index) => ({
-    id: readString(source, "id") ?? `source_${index + 1}`,
-    displayNameSnapshot: readString(source, "displayNameSnapshot"),
+    automatedTriggerSourceId:
+      readString(source, "automatedTriggerSourceId") ?? `source_${index + 1}`,
+    sourceDiscordUserId: readNullableString(source, "sourceDiscordUserId"),
+    sourceApplicationId: readNullableString(source, "sourceApplicationId"),
+    assignedOwnerDiscordUserId:
+      readString(source, "assignedOwnerDiscordUserId") ?? "0",
     status: readSourceStatus(source.status),
     replyMode: readReplyMode(source.replyMode),
-    cooldownSeconds: readNumber(source, "cooldownSeconds"),
-    assignedOwnerDiscordUserId: readString(
-      source,
-      "assignedOwnerDiscordUserId",
-    ),
+    cooldownSeconds: readNumber(source, "cooldownSeconds") ?? 60,
+    lastTriggeredAt: readNullableString(source, "lastTriggeredAt"),
+    createdAt: readString(source, "createdAt") ?? "",
+    updatedAt: readString(source, "updatedAt") ?? "",
   }));
+}
+
+function mapAutomatedTriggerSource(raw: unknown): AutomatedTriggerSource {
+  const [source] = mapAutomatedTriggerSources([raw]);
+  return (
+    source ?? {
+      automatedTriggerSourceId: "source_1",
+      sourceDiscordUserId: null,
+      sourceApplicationId: null,
+      assignedOwnerDiscordUserId: "0",
+      status: "active",
+      replyMode: "reply",
+      cooldownSeconds: 60,
+      lastTriggeredAt: null,
+      createdAt: "",
+      updatedAt: "",
+    }
+  );
 }
 
 export function createOwnerApiClient(fetchImpl: FetchLike = fetch) {
@@ -431,7 +410,19 @@ export function createOwnerApiClient(fetchImpl: FetchLike = fetch) {
       requestJson(
         fetchImpl,
         "/members",
-        { ...options, method: "POST", body: input },
+        {
+          ...options,
+          method: "POST",
+          body: {
+            memberDiscordUserId: input.discordUserId,
+            ...(input.displayNameSnapshot
+              ? { displayNameSnapshot: input.displayNameSnapshot }
+              : {}),
+            ...(input.assignedOwnerDiscordUserId
+              ? { assignedOwnerDiscordUserId: input.assignedOwnerDiscordUserId }
+              : {}),
+          },
+        },
         () => ({ ok: true }),
       ),
     disableRegisteredMember: (
@@ -458,13 +449,33 @@ export function createOwnerApiClient(fetchImpl: FetchLike = fetch) {
       ),
     getSettings: (options: OwnerRequestOptions = {}) =>
       requestJson(fetchImpl, "/settings", options, mapSettings),
-    updateSettings: (
-      input: Partial<OwnerSettings>,
+    updateBotSettings: (
+      input: UpdateBotSettingsRequest,
       options: OwnerRequestOptions = {},
     ) =>
       requestJson(
         fetchImpl,
-        "/settings",
+        "/settings/bot",
+        { ...options, method: "PUT", body: input },
+        mapSettings,
+      ),
+    updateModelSettings: (
+      input: UpdateModelSettingsRequest,
+      options: OwnerRequestOptions = {},
+    ) =>
+      requestJson(
+        fetchImpl,
+        "/settings/models",
+        { ...options, method: "PUT", body: input },
+        mapSettings,
+      ),
+    updatePromptSettingsMetadata: (
+      input: UpdatePromptSettingsMetadataInput,
+      options: OwnerRequestOptions = {},
+    ) =>
+      requestJson(
+        fetchImpl,
+        "/settings/prompts",
         { ...options, method: "PUT", body: input },
         mapSettings,
       ),
@@ -474,6 +485,27 @@ export function createOwnerApiClient(fetchImpl: FetchLike = fetch) {
         "/automated-trigger-sources",
         options,
         mapAutomatedTriggerSources,
+      ),
+    createAutomatedTriggerSource: (
+      input: CreateAutomatedTriggerSourceInput,
+      options: OwnerRequestOptions = {},
+    ) =>
+      requestJson(
+        fetchImpl,
+        "/automated-trigger-sources",
+        { ...options, method: "POST", body: input },
+        mapAutomatedTriggerSource,
+      ),
+    updateAutomatedTriggerSource: (
+      automatedTriggerSourceId: string,
+      input: UpdateAutomatedTriggerSourceRequest,
+      options: OwnerRequestOptions = {},
+    ) =>
+      requestJson(
+        fetchImpl,
+        `/automated-trigger-sources/${encodeURIComponent(automatedTriggerSourceId)}`,
+        { ...options, method: "PUT", body: input },
+        mapAutomatedTriggerSource,
       ),
   };
 }

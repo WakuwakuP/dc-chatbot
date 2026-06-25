@@ -83,7 +83,7 @@ export function MembersRoute() {
     } catch (createError) {
       if (isNotFoundProblem(createError)) {
         setActionMessage(
-          "追加 API はまだ利用できません。backend 実装後に有効になります。",
+          "追加対象の Registered Member metadata を処理できませんでした。",
         );
         return;
       }
@@ -95,14 +95,14 @@ export function MembersRoute() {
     setActionMessage(null);
     setError(null);
     try {
-      await ownerApi.disableRegisteredMember(member.discordUserId);
+      await ownerApi.disableRegisteredMember(member.memberDiscordUserId);
       setActionMessage(
-        `${member.discordUserId} の無効化リクエストを送信しました。`,
+        `${member.memberDiscordUserId} の無効化リクエストを送信しました。`,
       );
     } catch (disableError) {
       if (isNotFoundProblem(disableError)) {
         setActionMessage(
-          "無効化 API はまだ利用できません。backend 実装後に有効になります。",
+          "無効化対象の Registered Member が見つかりませんでした。",
         );
         return;
       }
@@ -124,7 +124,7 @@ export function MembersRoute() {
 
       {isUnavailable ? (
         <UnavailableNotice>
-          /api/v1/owner/members はまだ利用できません。
+          Registered Member list を取得できませんでした。
         </UnavailableNotice>
       ) : null}
       {error ? <ProblemNotice error={error} /> : null}
@@ -207,7 +207,7 @@ export function MembersRoute() {
           {!isLoading && members.length === 0 ? (
             <EmptyState
               title="Registered Member はまだありません"
-              description="backend route が未実装、または表示可能な member がない状態です。"
+              description="表示可能な Registered Member metadata はありません。"
             />
           ) : null}
           {members.length > 0 ? (
@@ -226,11 +226,11 @@ export function MembersRoute() {
                 <tbody>
                   {members.map((member) => (
                     <tr
-                      key={member.discordUserId}
+                      key={member.memberDiscordUserId}
                       className="border-t border-border"
                     >
                       <td className="py-2 pr-3 text-foreground">
-                        {member.discordUserId}
+                        {member.memberDiscordUserId}
                       </td>
                       <td className="py-2 pr-3">
                         {member.displayNameSnapshot ?? "未提供"}

@@ -17,13 +17,6 @@ import {
   UnavailableNotice,
 } from "./routeState";
 
-function maxBucketValue(summary: DashboardSummary) {
-  return Math.max(
-    1,
-    ...summary.usage.buckets.map((bucket) => bucket.requestCount),
-  );
-}
-
 export function HomeRoute() {
   const { owner } = useOwnerLayout();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
@@ -90,8 +83,8 @@ export function HomeRoute() {
 
       {isUnavailable ? (
         <UnavailableNotice>
-          /api/v1/owner/dashboard が未実装のため、/owner/me
-          から取得できる範囲だけ表示しています。
+          Dashboard summary を取得できないため、/owner/me
+          から取得できる Owner scope だけ表示しています。
         </UnavailableNotice>
       ) : null}
       {error ? <ProblemNotice error={error} /> : null}
@@ -108,21 +101,15 @@ export function HomeRoute() {
                   {ownerRoleLabelJa(summary.owner.role)}
                 </p>
                 <p>Owner Discord User ID: {summary.owner.ownerDiscordUserId}</p>
-                <p>
-                  管理対象 members:{" "}
-                  {summary.owner.managedMemberCount ?? "API 未提供"}
-                </p>
               </CardContent>
             </Card>
             <Card>
               <CardHeader>
-                <CardTitle>Usage metadata</CardTitle>
+                <CardTitle>Registered Members</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
-                <p>{summary.usage.periodLabel}</p>
-                <p>requests: {summary.usage.requestCount}</p>
-                <p>provider calls: {summary.usage.providerCallCount}</p>
-                <p>errors: {summary.usage.errorCount}</p>
+                <p>active: {summary.registeredMemberCounts.active}</p>
+                <p>disabled: {summary.registeredMemberCounts.disabled}</p>
               </CardContent>
             </Card>
           </div>
@@ -130,95 +117,37 @@ export function HomeRoute() {
           <div className="grid gap-4 lg:grid-cols-2">
             <Card>
               <CardHeader>
-                <CardTitle>Usage graph placeholder</CardTitle>
+                <CardTitle>Candidate Discord Users</CardTitle>
               </CardHeader>
-              <CardContent>
-                {summary.usage.buckets.length > 0 ? (
-                  <div className="space-y-3">
-                    {summary.usage.buckets.map((bucket) => (
-                      <div key={bucket.label} className="space-y-1">
-                        <div className="flex justify-between text-xs text-muted">
-                          <span>{bucket.label}</span>
-                          <span>
-                            {bucket.requestCount} requests / {bucket.errorCount}{" "}
-                            errors
-                          </span>
-                        </div>
-                        <div className="h-2 rounded-full bg-background">
-                          <div
-                            className="h-2 rounded-full bg-primary"
-                            style={{
-                              width: `${Math.max(4, (bucket.requestCount / maxBucketValue(summary)) * 100)}%`,
-                            }}
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <EmptyState
-                    title="usage metadata はまだありません"
-                    description="API が期間別 metadata を返すまで、グラフ領域だけを表示します。"
-                  />
-                )}
+              <CardContent className="space-y-2">
+                <p>visible records: {summary.candidateDiscordUserCount}</p>
+                <p>
+                  pending owner notifications:{" "}
+                  {summary.pendingOwnerNotificationCount}
+                </p>
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader>
-                <CardTitle>Recent errors</CardTitle>
+                <CardTitle>Automated Trigger Sources</CardTitle>
               </CardHeader>
-              <CardContent>
-                {summary.recentErrors.length > 0 ? (
-                  <ul className="space-y-3">
-                    {summary.recentErrors.map((item) => (
-                      <li
-                        key={item.id}
-                        className="rounded-md border border-border p-3"
-                      >
-                        <p className="font-medium text-foreground">
-                          {item.category}
-                        </p>
-                        <p>surface: {item.surface}</p>
-                        <p>occurred: {item.occurredAt || "API 未提供"}</p>
-                        <p>request ID: {item.requestId ?? "API 未提供"}</p>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <EmptyState
-                    title="recent errors はありません"
-                    description="metadata-only の error category と request ID だけを表示します。"
-                  />
-                )}
+              <CardContent className="space-y-2">
+                <p>active: {summary.automatedTriggerSourceCounts.active}</p>
+                <p>disabled: {summary.automatedTriggerSourceCounts.disabled}</p>
               </CardContent>
             </Card>
           </div>
 
           <Card>
             <CardHeader>
-              <CardTitle>Settings warnings</CardTitle>
+              <CardTitle>Usage metadata</CardTitle>
             </CardHeader>
             <CardContent>
-              {summary.settingsWarnings.length > 0 ? (
-                <ul className="space-y-2">
-                  {summary.settingsWarnings.map((warning) => (
-                    <li
-                      key={warning.code}
-                      className="flex flex-wrap items-center gap-2"
-                    >
-                      <StatusPill>{warning.severity}</StatusPill>
-                      <span className="text-foreground">{warning.title}</span>
-                      <span className="text-muted">({warning.code})</span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <EmptyState
-                  title="settings warnings はありません"
-                  description="API が返す警告 metadata がある場合だけ表示します。"
-                />
-              )}
+              <EmptyState
+                title="usage metadata はまだありません"
+                description="Dashboard では現在の API が返す件数 metadata だけを表示します。"
+              />
             </CardContent>
           </Card>
         </>

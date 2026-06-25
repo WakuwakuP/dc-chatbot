@@ -58,7 +58,7 @@ export function UnavailableNotice({ children }: { children?: ReactNode }) {
   return (
     <div className="rounded-md border border-border bg-background px-4 py-3 text-sm text-muted">
       {children ??
-        "この Owner API route はまだ利用できません。利用可能になるまで空の状態として表示します。"}
+        "Owner API metadata を取得できませんでした。表示可能な範囲だけ表示します。"}
     </div>
   );
 }

@@ -67,33 +67,22 @@ describe("Owner API client", () => {
     }
   });
 
-  it("keeps dashboard state to known metadata fields", async () => {
+  it("maps current dashboard summary metadata fields", async () => {
     const fetchImpl: typeof fetch = async () =>
       new Response(
         JSON.stringify({
           owner: {
             ownerDiscordUserId: "123456789012345678",
             role: "admin_owner",
-            managedMemberCount: 2,
             extra: "discarded-extra-field",
           },
-          usage: {
-            periodLabel: "直近30日",
-            requestCount: 4,
-            providerCallCount: 3,
-            errorCount: 1,
-            buckets: [{ label: "today", requestCount: 4, errorCount: 1 }],
+          registeredMemberCounts: {
+            active: 2,
+            disabled: 1,
           },
-          recentErrors: [
-            {
-              id: "01J00000000000000000000000",
-              occurredAt: "2026-06-20T00:00:00.000Z",
-              surface: "owner_api",
-              category: "provider_timeout",
-              extra: "discarded-extra-field",
-            },
-          ],
-          settingsWarnings: [{ code: "model_missing", title: "model 未設定" }],
+          candidateDiscordUserCount: 3,
+          pendingOwnerNotificationCount: 4,
+          automatedTriggerSourceCounts: { active: 5, disabled: 6 },
           extra: "discarded-extra-field",
         }),
         {
@@ -106,7 +95,97 @@ describe("Owner API client", () => {
     const summary = await api.getDashboardSummary();
 
     expect(summary.owner.ownerDiscordUserId).toBe("123456789012345678");
-    expect(summary.usage.requestCount).toBe(4);
+    expect(summary.registeredMemberCounts.active).toBe(2);
+    expect(summary.candidateDiscordUserCount).toBe(3);
+    expect(summary.automatedTriggerSourceCounts.disabled).toBe(6);
     expect(JSON.stringify(summary)).not.toContain("discarded-extra-field");
+  });
+
+  it("maps current settings response without prompt body content", async () => {
+    const fetchImpl: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          botSettings: {
+            notificationOwnerDiscordUserId: "123456789012345678",
+            automatedTriggerDefaultCooldownSeconds: 90,
+            updatedAt: "2026-06-20T00:00:00.000Z",
+          },
+          modelSettings: {
+            contextSelectionModel: "meta/llama-context",
+            responseDecisionModel: "meta/llama-decision",
+            responseGenerationModel: "meta/llama-generation",
+          },
+          promptSettings: [
+            {
+              promptSettingId: "01J00000000000000000000000",
+              promptKey: "response_generation",
+              activeVersionId: "01J00000000000000000000001",
+              activePromptBodySha256:
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+              activePromptBodyLength: 120,
+              updatedAt: "2026-06-20T00:00:00.000Z",
+              extraMetadata: "discarded-extra-field",
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      );
+    const api = createOwnerApiClient(fetchImpl);
+
+    const settings = await api.getSettings();
+
+    expect(settings.modelSettings.responseGenerationModel).toBe(
+      "meta/llama-generation",
+    );
+    expect(settings.promptSettings[0]?.activePromptBodyLength).toBe(120);
+    expect(JSON.stringify(settings)).not.toContain("discarded-extra-field");
+  });
+
+  it("uses current Automated Trigger Source endpoints and fields", async () => {
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const source = {
+      automatedTriggerSourceId: "01J00000000000000000000000",
+      sourceDiscordUserId: "234567890123456789",
+      sourceApplicationId: null,
+      assignedOwnerDiscordUserId: "123456789012345678",
+      status: "active",
+      replyMode: "channel_message",
+      cooldownSeconds: 120,
+      lastTriggeredAt: null,
+      createdAt: "2026-06-20T00:00:00.000Z",
+      updatedAt: "2026-06-20T00:00:00.000Z",
+    };
+    const fetchImpl: typeof fetch = async (url, init) => {
+      calls.push({ url: String(url), init });
+      return new Response(JSON.stringify(source), {
+        status: init?.method === "POST" ? 201 : 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+    const api = createOwnerApiClient(fetchImpl);
+
+    const created = await api.createAutomatedTriggerSource({
+      sourceDiscordUserId: "234567890123456789",
+      assignedOwnerDiscordUserId: "123456789012345678",
+      replyMode: "channel_message",
+      cooldownSeconds: 120,
+    });
+    const updated = await api.updateAutomatedTriggerSource(
+      created.automatedTriggerSourceId,
+      { status: "disabled", replyMode: "none", cooldownSeconds: 60 },
+    );
+
+    expect(calls[0]?.url).toContain(
+      "/api/v1/owner/automated-trigger-sources",
+    );
+    expect(calls[0]?.init?.method).toBe("POST");
+    expect(calls[1]?.url).toContain(
+      "/api/v1/owner/automated-trigger-sources/01J00000000000000000000000",
+    );
+    expect(calls[1]?.init?.method).toBe("PUT");
+    expect(updated.replyMode).toBe("channel_message");
   });
 });

@@ -29,6 +29,7 @@ import {
   createUlid,
   type BotMessageIntakeResponse,
   type BotRespondResponse,
+  type ConfiguredProviderAccessStatus,
   type ContextFetchPlan,
   type HealthResponse,
   type OwnerDashboardSummaryResponse,
@@ -36,6 +37,7 @@ import {
   type OwnerNotificationListResponse,
   type OwnerRole,
   type ProblemDetails,
+  type SafeProviderErrorCategory,
   parseJson,
 } from "@dc-chatbot/shared";
 
@@ -117,21 +119,69 @@ function createLLMProviderOptions(env: Env): CreateLLMProviderOptions {
   return { providerKind: "nvidia_nim", nvidiaNim };
 }
 
-function safeProviderErrorCategory(error: unknown): string {
+type ActiveProviderIdentity =
+  | { providerKind: "fake"; providerRef: "local" }
+  | { providerKind: "nvidia_nim"; providerRef: "deployment" };
+
+function activeProviderIdentity(env: Env): ActiveProviderIdentity {
+  return env.LLM_PROVIDER === "nvidia_nim"
+    ? { providerKind: "nvidia_nim", providerRef: "deployment" }
+    : { providerKind: "fake", providerRef: "local" };
+}
+
+function configuredProviderAccessStatus(
+  env: Env,
+): {
+  status: ConfiguredProviderAccessStatus;
+  safeErrorCategory: SafeProviderErrorCategory | null;
+} {
+  if (env.LLM_PROVIDER !== "nvidia_nim") {
+    return { status: "available", safeErrorCategory: null };
+  }
+
+  if ((env.NVIDIA_NIM_BEARER_TOKEN ?? "").trim().length === 0) {
+    return { status: "not_configured", safeErrorCategory: "not_configured" };
+  }
+
+  return { status: "available", safeErrorCategory: null };
+}
+
+function safeProviderErrorCategory(
+  error: unknown,
+): SafeProviderErrorCategory {
   return error instanceof ProviderError ? error.safeCategory : "unknown";
 }
 
-function providerErrorStatus(category: string): number {
+function providerErrorStatus(category: SafeProviderErrorCategory): number {
   switch (category) {
+    case "not_configured":
+    case "authentication_failed":
+    case "temporary_unavailable":
+      return 503;
     case "rate_limited":
       return 429;
     case "policy_rejected":
       return 422;
-    case "temporary_unavailable":
-      return 503;
     default:
       return 502;
   }
+}
+
+function providerProblemCode(category: SafeProviderErrorCategory): string {
+  switch (category) {
+    case "not_configured":
+      return "provider_not_configured";
+    case "authentication_failed":
+      return "provider_authentication_failed";
+    default:
+      return "provider_unavailable";
+  }
+}
+
+function providerAccessStatusForError(
+  category: SafeProviderErrorCategory,
+): ConfiguredProviderAccessStatus {
+  return category === "not_configured" ? "not_configured" : "unavailable";
 }
 
 const ACCESS_JWT_CLOCK_TOLERANCE_SECONDS = 60;
@@ -837,7 +887,7 @@ async function handleBotRespond(request: Request, env: Env): Promise<Response> {
 
   const startedAt = Date.now();
   const nowIsoUtc = new Date(startedAt).toISOString();
-  let providerRef = "local";
+  const providerIdentity = activeProviderIdentity(env);
 
   if (repository) {
     if (respondRequest.triggerKind === "automated_trigger_source") {
@@ -865,7 +915,6 @@ async function handleBotRespond(request: Request, env: Env): Promise<Response> {
           respondRequest.requestId,
         );
       }
-      providerRef = automatedSource.assignedOwnerDiscordUserId;
     } else {
       const allowedUser = await repository.findAllowedDiscordUser(
         respondRequest.triggerAuthorDiscordUserId,
@@ -887,8 +936,53 @@ async function handleBotRespond(request: Request, env: Env): Promise<Response> {
           respondRequest.requestId,
         );
       }
-      providerRef = allowedUser.assignedOwnerDiscordUserId;
     }
+  }
+
+  const configuredAccess = configuredProviderAccessStatus(env);
+  if (repository) {
+    await repository.upsertProviderConfigMetadata({
+      providerKind: providerIdentity.providerKind,
+      configuredProviderAccessStatus: configuredAccess.status,
+      checkedAt: nowIsoUtc,
+      safeErrorCategory: configuredAccess.safeErrorCategory,
+      nowIsoUtc,
+    });
+  }
+
+  if (configuredAccess.status !== "available") {
+    const failedAt = new Date().toISOString();
+    const safeErrorCategory =
+      configuredAccess.safeErrorCategory ?? "not_configured";
+    if (repository) {
+      await Promise.all([
+        repository.insertProviderCallAudit({
+          ...providerIdentity,
+          providerCallId: createUlid(),
+          requestId: respondRequest.requestId,
+          model: respondRequest.model,
+          status: "failed",
+          safeErrorCategory,
+          durationMs: Date.now() - startedAt,
+          createdAt: failedAt,
+          retainUntil: addDaysIso(failedAt, 365),
+        }),
+        recordAudit(repository, {
+          actorType: "bot_service",
+          requestId: respondRequest.requestId,
+          eventType: "bot.message_respond.provider_failed",
+          status: "failed",
+          nowIsoUtc: failedAt,
+          errorCategory: safeErrorCategory,
+        }),
+      ]);
+    }
+    return problemResponse(
+      providerErrorStatus(safeErrorCategory),
+      providerProblemCode(safeErrorCategory),
+      "Provider unavailable",
+      respondRequest.requestId,
+    );
   }
 
   const providerRequest = respondRequest.conversationContextMessages
@@ -913,19 +1007,41 @@ async function handleBotRespond(request: Request, env: Env): Promise<Response> {
     providerResponse = await provider.generateResponse(providerRequest);
   } catch (error) {
     const safeErrorCategory = safeProviderErrorCategory(error);
+    const failedAt = new Date().toISOString();
     if (repository) {
-      await recordAudit(repository, {
-        actorType: "bot_service",
-        requestId: respondRequest.requestId,
-        eventType: "bot.message_respond.provider_failed",
-        status: "failed",
-        nowIsoUtc: new Date().toISOString(),
-        errorCategory: safeErrorCategory,
-      });
+      await Promise.all([
+        repository.upsertProviderConfigMetadata({
+          providerKind: providerIdentity.providerKind,
+          configuredProviderAccessStatus:
+            providerAccessStatusForError(safeErrorCategory),
+          checkedAt: failedAt,
+          safeErrorCategory,
+          nowIsoUtc: failedAt,
+        }),
+        repository.insertProviderCallAudit({
+          ...providerIdentity,
+          providerCallId: createUlid(),
+          requestId: respondRequest.requestId,
+          model: respondRequest.model,
+          status: "failed",
+          safeErrorCategory,
+          durationMs: Date.now() - startedAt,
+          createdAt: failedAt,
+          retainUntil: addDaysIso(failedAt, 365),
+        }),
+        recordAudit(repository, {
+          actorType: "bot_service",
+          requestId: respondRequest.requestId,
+          eventType: "bot.message_respond.provider_failed",
+          status: "failed",
+          nowIsoUtc: failedAt,
+          errorCategory: safeErrorCategory,
+        }),
+      ]);
     }
     return problemResponse(
       providerErrorStatus(safeErrorCategory),
-      "provider_unavailable",
+      providerProblemCode(safeErrorCategory),
       "Provider unavailable",
       respondRequest.requestId,
     );
@@ -934,10 +1050,17 @@ async function handleBotRespond(request: Request, env: Env): Promise<Response> {
   if (repository) {
     const finishedAt = new Date().toISOString();
     await Promise.all([
+      repository.upsertProviderConfigMetadata({
+        providerKind: providerIdentity.providerKind,
+        configuredProviderAccessStatus: "available",
+        checkedAt: finishedAt,
+        safeErrorCategory: null,
+        nowIsoUtc: finishedAt,
+      }),
       repository.insertProviderCallAudit({
+        ...providerIdentity,
         providerCallId: providerResponse.providerCallId,
         requestId: respondRequest.requestId,
-        providerRef,
         model: providerResponse.model,
         status: "completed",
         safeErrorCategory: null,

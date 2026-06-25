@@ -166,6 +166,29 @@ class FakeD1Database {
   }
 }
 
+function dbCallsContaining(
+  db: FakeD1Database,
+  sqlFragment: string,
+): { sql: string; bindings: unknown[] }[] {
+  return db.calls.filter((call) => call.sql.includes(sqlFragment));
+}
+
+function dbBindingStrings(db: FakeD1Database): string[] {
+  return db.calls
+    .flatMap((call) => call.bindings)
+    .filter((binding): binding is string => typeof binding === "string");
+}
+
+function expectNoDbBindingString(
+  db: FakeD1Database,
+  forbidden: readonly string[],
+): void {
+  const bindings = dbBindingStrings(db);
+  for (const value of forbidden) {
+    expect(bindings).not.toContain(value);
+  }
+}
+
 describe("API Worker routes", () => {
   it("serves health", async () => {
     const response = await worker.fetch(
@@ -499,6 +522,185 @@ describe("API Worker routes", () => {
     expect(firstBody.providerCallId).toMatch(ULID_REGEX);
     expect(secondBody.providerCallId).toMatch(ULID_REGEX);
     expect(secondBody.providerCallId).not.toBe(firstBody.providerCallId);
+  });
+
+  it("records fake provider call audit metadata without response text", async () => {
+    const db = new FakeD1Database(["300"]);
+    const response = await worker.fetch(
+      new Request("https://api.test/api/v1/bot/messages/respond", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-dev-auth-secret": LOCAL_AUTH_BYPASS_SECRET,
+          "x-dev-bot-service": "true",
+        },
+        body: JSON.stringify({
+          requestId: "01HY0000000000000000000000",
+          triggerMessageId: "100",
+          triggerAuthorDiscordUserId: "300",
+          triggerKind: "dm",
+          model: "fake-model",
+          conversationContextMessageIds: [],
+        }),
+      }),
+      { ...env, DB: db as unknown as D1Database },
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await readJson(response)) as { replyChunks: string[] };
+    const providerAudit = dbCallsContaining(
+      db,
+      "INSERT INTO provider_call_audit_metadata",
+    );
+    expect(providerAudit).toHaveLength(1);
+    expect(providerAudit[0]?.bindings.slice(1, 7)).toEqual([
+      "01HY0000000000000000000000",
+      "fake",
+      "local",
+      "fake-model",
+      "completed",
+      null,
+    ]);
+    expect(
+      dbCallsContaining(db, "INSERT INTO provider_settings").at(-1)?.bindings,
+    ).toEqual([
+      "fake",
+      "available",
+      expect.any(String),
+      null,
+      "singleton",
+      expect.any(String),
+      expect.any(String),
+    ]);
+    expect(dbBindingStrings(db)).not.toContain(body.replyChunks[0]);
+  });
+
+  it("maps missing NVIDIA NIM API Key configuration to safe metadata", async () => {
+    const db = new FakeD1Database(["300"]);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await worker.fetch(
+      new Request("https://api.test/api/v1/bot/messages/respond", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-dev-auth-secret": LOCAL_AUTH_BYPASS_SECRET,
+          "x-dev-bot-service": "true",
+        },
+        body: JSON.stringify({
+          requestId: "01HY0000000000000000000000",
+          triggerMessageId: "100",
+          triggerAuthorDiscordUserId: "300",
+          triggerKind: "dm",
+          model: "meta/llama-3.1-70b-instruct",
+          conversationContextMessageIds: [],
+        }),
+      }),
+      {
+        ...env,
+        DB: db as unknown as D1Database,
+        LLM_PROVIDER: "nvidia_nim",
+      },
+    );
+
+    expect(response.status).toBe(503);
+    expect(await readJson(response)).toMatchObject({
+      code: "provider_not_configured",
+      requestId: "01HY0000000000000000000000",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(
+      dbCallsContaining(db, "INSERT INTO provider_settings").at(-1)?.bindings,
+    ).toEqual([
+      "nvidia_nim",
+      "not_configured",
+      expect.any(String),
+      "not_configured",
+      "singleton",
+      expect.any(String),
+      expect.any(String),
+    ]);
+    expect(
+      dbCallsContaining(db, "INSERT INTO provider_call_audit_metadata").at(-1)
+        ?.bindings.slice(1, 7),
+    ).toEqual([
+      "01HY0000000000000000000000",
+      "nvidia_nim",
+      "deployment",
+      "meta/llama-3.1-70b-instruct",
+      "failed",
+      "not_configured",
+    ]);
+  });
+
+  it("maps invalid NVIDIA NIM provider access to safe audit metadata", async () => {
+    const db = new FakeD1Database(["300"]);
+    const tokenPlaceholder = "1";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 401 })),
+    );
+
+    const response = await worker.fetch(
+      new Request("https://api.test/api/v1/bot/messages/respond", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-dev-auth-secret": LOCAL_AUTH_BYPASS_SECRET,
+          "x-dev-bot-service": "true",
+        },
+        body: JSON.stringify({
+          requestId: "01HY0000000000000000000000",
+          triggerMessageId: "100",
+          triggerAuthorDiscordUserId: "300",
+          triggerKind: "dm",
+          model: "meta/llama-3.1-70b-instruct",
+          conversationContextMessageIds: [],
+        }),
+      }),
+      {
+        ...env,
+        DB: db as unknown as D1Database,
+        LLM_PROVIDER: "nvidia_nim",
+        NVIDIA_NIM_BEARER_TOKEN: tokenPlaceholder,
+      },
+    );
+
+    expect(response.status).toBe(503);
+    expect(await readJson(response)).toMatchObject({
+      code: "provider_authentication_failed",
+      requestId: "01HY0000000000000000000000",
+    });
+    expect(
+      dbCallsContaining(db, "INSERT INTO provider_settings").at(-1)?.bindings,
+    ).toEqual([
+      "nvidia_nim",
+      "unavailable",
+      expect.any(String),
+      "authentication_failed",
+      "singleton",
+      expect.any(String),
+      expect.any(String),
+    ]);
+    expect(
+      dbCallsContaining(db, "INSERT INTO provider_call_audit_metadata").at(-1)
+        ?.bindings.slice(1, 7),
+    ).toEqual([
+      "01HY0000000000000000000000",
+      "nvidia_nim",
+      "deployment",
+      "meta/llama-3.1-70b-instruct",
+      "failed",
+      "authentication_failed",
+    ]);
+    expectNoDbBindingString(db, [
+      tokenPlaceholder,
+      `Bearer ${tokenPlaceholder}`,
+      "authorization",
+      "chat/completions",
+      "choices",
+    ]);
   });
 
   it("rejects Regular Owner metadata settings mutation", async () => {

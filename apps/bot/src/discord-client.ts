@@ -38,6 +38,7 @@ export async function startBot(
     apiBaseUrl: config.apiBaseUrl,
     cloudflareAccessClientId: config.cloudflareAccessClientId,
     cloudflareAccessClientSecret: config.cloudflareAccessClientSecret,
+    localAuthBypassSecret: config.localAuthBypassSecret,
   });
 
   await apiClient.checkHealth().catch(() => {

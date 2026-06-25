@@ -16,10 +16,7 @@ const RETENTION_TABLES: readonly RetentionTable[] = [
   { tableName: "owner_notifications", columnName: "retain_until" },
   { tableName: "setting_audit_metadata", columnName: "retain_until" },
   { tableName: "discord_response_messages", columnName: "retain_until" },
-  { tableName: "connection_flow_states", columnName: "retain_until" },
   { tableName: "cleanup_run_metadata", columnName: "retain_until" },
-  { tableName: "generation_locks", columnName: "locked_until" },
-  { tableName: "refresh_locks", columnName: "locked_until" },
 ] as const;
 
 export function buildRetentionCleanupPlan(

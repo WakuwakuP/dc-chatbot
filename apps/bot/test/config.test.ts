@@ -15,6 +15,7 @@ describe("loadBotConfig", () => {
         DC_CHATBOT_API_BASE_URL: "https://api.test",
         CF_ACCESS_CLIENT_ID: "client-id",
         CF_ACCESS_CLIENT_SECRET: "client-secret",
+        LOCAL_AUTH_BYPASS_SECRET: "local-auth-bypass-secret",
       }),
     ).toThrow("DISCORD_DEV_ALLOWED_USER_IDS");
   });
@@ -28,11 +29,13 @@ describe("loadBotConfig", () => {
       DC_CHATBOT_API_BASE_URL: "https://api.test",
       CF_ACCESS_CLIENT_ID: "client-id",
       CF_ACCESS_CLIENT_SECRET: "client-secret",
+      LOCAL_AUTH_BYPASS_SECRET: "local-auth-bypass-secret",
     });
 
     expect(config.mode).toBe("development");
     expect(config.devGuildId).toBe("456");
     expect(config.devAllowedDiscordUserIds).toEqual(["111", "222"]);
+    expect(config.localAuthBypassSecret).toBe("local-auth-bypass-secret");
   });
 
   it("refuses development bypass in production", () => {

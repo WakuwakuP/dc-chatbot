@@ -17,19 +17,6 @@ import {
   UnavailableNotice,
 } from "./routeState";
 
-function connectionLabel(status: DashboardSummary["connection"]["status"]) {
-  switch (status) {
-    case "connected":
-      return "接続済み";
-    case "needs_reconnect":
-      return "再接続が必要";
-    case "revoked":
-      return "revoke 済み";
-    case "missing":
-      return "未接続";
-  }
-}
-
 function maxBucketValue(summary: DashboardSummary) {
   return Math.max(
     1,
@@ -96,8 +83,8 @@ export function HomeRoute() {
           Owner dashboard
         </h2>
         <p className="mt-1 text-sm text-muted">
-          Owner scope、Connection status、usage metadata、recent
-          errors、settings warnings の概要です。
+          Owner scope、usage metadata、recent errors、settings warnings
+          の概要です。
         </p>
       </div>
 
@@ -111,7 +98,7 @@ export function HomeRoute() {
 
       {summary ? (
         <>
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-2">
             <Card>
               <CardHeader>
                 <CardTitle>Owner scope</CardTitle>
@@ -124,23 +111,6 @@ export function HomeRoute() {
                 <p>
                   管理対象 members:{" "}
                   {summary.owner.managedMemberCount ?? "API 未提供"}
-                </p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle>Connection summary</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <StatusPill>
-                  {connectionLabel(summary.connection.status)}
-                </StatusPill>
-                <p>
-                  有効 connection 数:{" "}
-                  {summary.connection.activeConnectionCount ?? "API 未提供"}
-                </p>
-                <p>
-                  最終確認: {summary.connection.lastCheckedAt ?? "API 未提供"}
                 </p>
               </CardContent>
             </Card>

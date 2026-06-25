@@ -2,8 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import worker, { type Env } from "../src/worker";
 
 const LOCAL_AUTH_BYPASS_SECRET = "local-auth-bypass-secret";
-const TEST_CREDENTIAL_MASTER_KEY_CURRENT =
-  "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+const ULID_REGEX = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 
 const env: Env = {
   DC_CHATBOT_ENV: "test",
@@ -11,7 +10,6 @@ const env: Env = {
   LOCAL_AUTH_BYPASS_SECRET,
   CF_ACCESS_CLIENT_ID: "client-id",
   CF_ACCESS_CLIENT_SECRET: "client-secret",
-  CHATGPT_CREDENTIAL_MASTER_KEY_CURRENT: TEST_CREDENTIAL_MASTER_KEY_CURRENT,
 };
 
 async function readJson(response: Response): Promise<unknown> {
@@ -90,13 +88,6 @@ async function createAccessJwt(input: {
   };
 }
 
-type FakeConnectionRow = {
-  connection_id: string;
-  owner_discord_user_id: string;
-  status: "active" | "needs_reconnect" | "revoked";
-  updated_at: string;
-};
-
 class FakeD1Statement {
   private bindings: unknown[] = [];
 
@@ -130,33 +121,22 @@ class FakeD1Statement {
     }
 
     if (
-      this.sql.includes("SELECT status") &&
-      this.sql.includes("FROM chatgpt_subscription_connections")
-    ) {
-      return this.db.latestConnection
-        ? ({ status: this.db.latestConnection.status } as T)
-        : null;
-    }
-
-    if (
-      this.sql.includes("SELECT connection_id") &&
-      this.sql.includes("FROM chatgpt_subscription_connections")
-    ) {
-      return this.db.latestConnection as T | null;
-    }
-
-    if (
-      this.sql.includes("FROM connection_flow_states") &&
-      this.sql.includes("status = 'pending'")
-    ) {
-      return { connection_flow_state_id: this.bindings[0] } as T;
-    }
-
-    if (
       this.sql.includes("FROM owner_discord_users") &&
       this.sql.includes("role = 'admin_owner'")
     ) {
       return { owner_discord_user_id: "999" } as T;
+    }
+
+    if (
+      this.sql.includes("FROM owner_discord_users") &&
+      this.sql.includes("WHERE owner_discord_user_id = ?") &&
+      typeof this.bindings[0] === "string" &&
+      this.db.allowedOwnerDiscordUserIds.has(this.bindings[0])
+    ) {
+      return {
+        owner_discord_user_id: this.bindings[0],
+        role: "regular_owner",
+      } as T;
     }
 
     return null;
@@ -164,16 +144,6 @@ class FakeD1Statement {
 
   async run(): Promise<{ meta: { changes: number } }> {
     this.db.calls.push({ sql: this.sql, bindings: this.bindings });
-
-    if (this.sql.includes("INSERT INTO chatgpt_subscription_connections")) {
-      this.db.latestConnection = {
-        connection_id: String(this.bindings[0]),
-        owner_discord_user_id: String(this.bindings[1]),
-        status: "active",
-        updated_at: String(this.bindings[4]),
-      };
-    }
-
     return { meta: { changes: 1 } };
   }
 
@@ -185,7 +155,11 @@ class FakeD1Statement {
 
 class FakeD1Database {
   readonly calls: { sql: string; bindings: unknown[] }[] = [];
-  latestConnection: FakeConnectionRow | null = null;
+  readonly allowedOwnerDiscordUserIds: Set<string>;
+
+  constructor(allowedOwnerDiscordUserIds: readonly string[] = []) {
+    this.allowedOwnerDiscordUserIds = new Set(allowedOwnerDiscordUserIds);
+  }
 
   prepare(sql: string): FakeD1Statement {
     return new FakeD1Statement(this, sql);
@@ -440,7 +414,6 @@ describe("API Worker routes", () => {
           triggerMessageId: "100",
           triggerAuthorDiscordUserId: "300",
           triggerKind: "dm",
-          effectiveConnectionId: "01HY0000000000000000000002",
           model: "fake-model",
           conversationContextMessageIds: [],
         }),
@@ -468,7 +441,6 @@ describe("API Worker routes", () => {
           triggerMessageId: "100",
           triggerAuthorDiscordUserId: "300",
           triggerKind: "dm",
-          effectiveConnectionId: "01HY0000000000000000000002",
           model: "fake-model",
           conversationContextMessageIds: [],
         }),
@@ -480,9 +452,53 @@ describe("API Worker routes", () => {
     const body = await readJson(response);
     expect(body).toMatchObject({
       requestId: "01HY0000000000000000000000",
-      providerCallId: "01HY0000000000000000000001",
     });
     expect(body).toHaveProperty("replyChunks");
+    expect((body as { providerCallId: unknown }).providerCallId).toMatch(
+      ULID_REGEX,
+    );
+  });
+
+  it("uses distinct fake provider call IDs for consecutive bot responses", async () => {
+    const db = new FakeD1Database(["300"]);
+    const buildRequest = (requestId: string) =>
+      new Request("https://api.test/api/v1/bot/messages/respond", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-dev-auth-secret": LOCAL_AUTH_BYPASS_SECRET,
+          "x-dev-bot-service": "true",
+        },
+        body: JSON.stringify({
+          requestId,
+          triggerMessageId: "100",
+          triggerAuthorDiscordUserId: "300",
+          triggerKind: "dm",
+          model: "fake-model",
+          conversationContextMessageIds: [],
+        }),
+      });
+
+    const firstResponse = await worker.fetch(
+      buildRequest("01HY0000000000000000000000"),
+      { ...env, DB: db as unknown as D1Database },
+    );
+    const secondResponse = await worker.fetch(
+      buildRequest("01HY0000000000000000000002"),
+      { ...env, DB: db as unknown as D1Database },
+    );
+
+    expect(firstResponse.status).toBe(200);
+    expect(secondResponse.status).toBe(200);
+    const firstBody = (await readJson(firstResponse)) as {
+      providerCallId: string;
+    };
+    const secondBody = (await readJson(secondResponse)) as {
+      providerCallId: string;
+    };
+    expect(firstBody.providerCallId).toMatch(ULID_REGEX);
+    expect(secondBody.providerCallId).toMatch(ULID_REGEX);
+    expect(secondBody.providerCallId).not.toBe(firstBody.providerCallId);
   });
 
   it("rejects Regular Owner metadata settings mutation", async () => {
@@ -504,121 +520,6 @@ describe("API Worker routes", () => {
 
     expect(response.status).toBe(403);
     expect(await readJson(response)).toMatchObject({ code: "forbidden" });
-  });
-
-  it("encrypts provider-returned credential material before D1 persistence", async () => {
-    const db = new FakeD1Database();
-    const sensitiveCredential = "TEST_PROVIDER_RETURNED_CREDENTIAL_MATERIAL";
-    const response = await worker.fetch(
-      new Request("https://api.test/api/v1/owner/connection/flow/callback", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-dev-access-subject": "regular@example.com",
-          "x-dev-auth-secret": LOCAL_AUTH_BYPASS_SECRET,
-        },
-        body: JSON.stringify({
-          connectionFlowStateId: "01HY0000000000000000000000",
-          state: "state-token",
-          opaqueCredentialCiphertext: sensitiveCredential,
-        }),
-      }),
-      { ...env, DB: db as unknown as D1Database },
-    );
-
-    expect(response.status).toBe(200);
-    expect(await readJson(response)).toMatchObject({
-      ownerDiscordUserId: "111",
-      connectionStatus: "connected",
-    });
-    const allBindings = db.calls.flatMap((call) => call.bindings);
-    expect(allBindings).not.toContain(sensitiveCredential);
-    expect(
-      allBindings.some((binding) =>
-        String(binding).includes(sensitiveCredential),
-      ),
-    ).toBe(false);
-
-    const connectionInsert = db.calls.find((call) =>
-      call.sql.includes("INSERT INTO chatgpt_subscription_connections"),
-    );
-    const storedCredential = connectionInsert?.bindings[2];
-    expect(typeof storedCredential).toBe("string");
-    const envelope = JSON.parse(String(storedCredential)) as {
-      v?: unknown;
-      credentialAlg?: unknown;
-      keyWrapAlg?: unknown;
-      masterKeyId?: unknown;
-      additionalAuthenticatedData?: {
-        ownerDiscordUserId?: unknown;
-        connectionFlowStateId?: unknown;
-        connectionId?: unknown;
-      };
-      credentialIv?: unknown;
-      credentialCiphertext?: unknown;
-      wrappedDataKeyIv?: unknown;
-      wrappedDataKeyCiphertext?: unknown;
-    };
-    expect(envelope).toMatchObject({
-      v: 2,
-      credentialAlg: "AES-GCM",
-      keyWrapAlg: "AES-GCM",
-      masterKeyId: "current",
-      additionalAuthenticatedData: {
-        ownerDiscordUserId: "111",
-        connectionFlowStateId: "01HY0000000000000000000000",
-        connectionId: connectionInsert?.bindings[0],
-      },
-    });
-    expect(typeof envelope.credentialIv).toBe("string");
-    expect(atob(String(envelope.credentialIv))).toHaveLength(12);
-    expect(typeof envelope.credentialCiphertext).toBe("string");
-    expect(String(envelope.credentialCiphertext)).not.toContain(
-      sensitiveCredential,
-    );
-    expect(typeof envelope.wrappedDataKeyIv).toBe("string");
-    expect(atob(String(envelope.wrappedDataKeyIv))).toHaveLength(12);
-    expect(typeof envelope.wrappedDataKeyCiphertext).toBe("string");
-    expect(atob(String(envelope.wrappedDataKeyCiphertext))).toHaveLength(48);
-    expect(String(envelope.wrappedDataKeyCiphertext)).not.toContain(
-      sensitiveCredential,
-    );
-    expect(String(storedCredential)).not.toContain(sensitiveCredential);
-  });
-
-  it("returns 503 when credential encryption key is missing", async () => {
-    const db = new FakeD1Database();
-    const {
-      CHATGPT_CREDENTIAL_MASTER_KEY_CURRENT: _removed,
-      ...envWithoutKey
-    } = env;
-    const response = await worker.fetch(
-      new Request("https://api.test/api/v1/owner/connection/flow/callback", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-dev-access-subject": "regular@example.com",
-          "x-dev-auth-secret": LOCAL_AUTH_BYPASS_SECRET,
-        },
-        body: JSON.stringify({
-          connectionFlowStateId: "01HY0000000000000000000000",
-          state: "state-token",
-          opaqueCredentialCiphertext:
-            "TEST_PROVIDER_RETURNED_CREDENTIAL_MATERIAL",
-        }),
-      }),
-      { ...envWithoutKey, DB: db as unknown as D1Database },
-    );
-
-    expect(response.status).toBe(503);
-    expect(await readJson(response)).toMatchObject({
-      code: "credential_encryption_unavailable",
-    });
-    expect(
-      db.calls.some((call) =>
-        call.sql.includes("INSERT INTO chatgpt_subscription_connections"),
-      ),
-    ).toBe(false);
   });
 
   it("does not persist transient Discord message content from bot intake", async () => {

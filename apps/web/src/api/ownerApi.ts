@@ -4,20 +4,11 @@ import type {
   ProblemDetails,
 } from "@dc-chatbot/shared";
 
-export type OwnerConnectionStatus =
-  | OwnerMeResponse["connectionStatus"]
-  | "revoked";
-
 export type DashboardSummary = {
   owner: {
     ownerDiscordUserId: string;
     role: OwnerRole;
     managedMemberCount: number | null;
-  };
-  connection: {
-    status: OwnerConnectionStatus;
-    lastCheckedAt: string | null;
-    activeConnectionCount: number | null;
   };
   usage: {
     periodLabel: string;
@@ -83,19 +74,6 @@ export type AutomatedTriggerSource = {
   assignedOwnerDiscordUserId: string | null;
 };
 
-export type ConnectionSummary = {
-  ownerDiscordUserId: string;
-  status: OwnerConnectionStatus;
-  lastCheckedAt: string | null;
-  needsReconnectReason: string | null;
-};
-
-export type OwnerActionResult = {
-  status: "accepted" | "unavailable";
-  title: string;
-  redirectUrl: string | null;
-};
-
 export type CreateRegisteredMemberInput = {
   discordUserId: string;
   displayNameSnapshot?: string;
@@ -117,6 +95,43 @@ type RequestJsonOptions = OwnerRequestOptions & {
   method?: "GET" | "POST" | "PUT" | "DELETE";
   body?: unknown;
 };
+
+function resolveOwnerApiUrl(path: string): string {
+  if (import.meta.env.DEV) {
+    return path;
+  }
+
+  const baseUrl = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/u, "") ?? "";
+  return baseUrl ? `${baseUrl}${path}` : path;
+}
+
+function buildOwnerRequestHeaders(
+  baseHeaders: Record<string, string> = {},
+): Record<string, string> {
+  if (!import.meta.env.DEV) {
+    return baseHeaders;
+  }
+
+  const secret = import.meta.env.VITE_LOCAL_AUTH_BYPASS_SECRET;
+  const accessSubject = import.meta.env.VITE_DEV_ACCESS_SUBJECT;
+  const ownerDiscordUserId = import.meta.env.VITE_DEV_OWNER_DISCORD_USER_ID;
+  if (!secret || !accessSubject || !ownerDiscordUserId) {
+    return baseHeaders;
+  }
+
+  const headers: Record<string, string> = {
+    ...baseHeaders,
+    "x-dev-auth-secret": secret,
+    "x-dev-access-subject": accessSubject,
+    "x-dev-owner-discord-user-id": ownerDiscordUserId,
+  };
+  const ownerRole = import.meta.env.VITE_DEV_OWNER_ROLE;
+  if (ownerRole === "admin_owner" || ownerRole === "regular_owner") {
+    headers["x-dev-owner-role"] = ownerRole;
+  }
+
+  return headers;
+}
 
 export class OwnerApiProblemError extends Error {
   readonly problem: ProblemDetails;
@@ -172,25 +187,6 @@ function readArray(value: unknown): Record<string, unknown>[] {
 
 function readOwnerRole(value: unknown): OwnerRole {
   return value === "regular_owner" ? "regular_owner" : "admin_owner";
-}
-
-function readConnectionStatus(value: unknown): OwnerConnectionStatus {
-  if (
-    value === "connected" ||
-    value === "needs_reconnect" ||
-    value === "missing" ||
-    value === "revoked"
-  ) {
-    return value;
-  }
-  return "missing";
-}
-
-function readOwnerMeConnectionStatus(
-  value: unknown,
-): OwnerMeResponse["connectionStatus"] {
-  const status = readConnectionStatus(value);
-  return status === "revoked" ? "missing" : status;
 }
 
 function readMemberStatus(value: unknown): RegisteredMember["status"] {
@@ -265,15 +261,22 @@ async function requestJson<T>(
   map: (raw: unknown) => T,
 ): Promise<T> {
   const init: RequestInit = { method: options.method ?? "GET" };
+  const headers = buildOwnerRequestHeaders();
   if (options.body) {
-    init.headers = { "content-type": "application/json" };
+    headers["content-type"] = "application/json";
     init.body = JSON.stringify(options.body);
+  }
+  if (Object.keys(headers).length > 0) {
+    init.headers = headers;
   }
   if (options.signal) {
     init.signal = options.signal;
   }
 
-  const response = await fetchImpl(`/api/v1/owner${path}`, init);
+  const response = await fetchImpl(
+    resolveOwnerApiUrl(`/api/v1/owner${path}`),
+    init,
+  );
   const raw = response.status === 204 ? null : await readJson(response);
 
   if (!response.ok) {
@@ -295,7 +298,6 @@ function mapOwnerMe(raw: unknown): OwnerMeResponse {
   return {
     ownerDiscordUserId: readString(record, "ownerDiscordUserId") ?? "0",
     role: readOwnerRole(record.role),
-    connectionStatus: readOwnerMeConnectionStatus(record.connectionStatus),
   };
 }
 
@@ -318,7 +320,6 @@ function mapUsageBuckets(raw: unknown): UsageBucket[] {
 function mapDashboardSummary(raw: unknown): DashboardSummary {
   const record = isRecord(raw) ? raw : {};
   const owner = isRecord(record.owner) ? record.owner : record;
-  const connection = isRecord(record.connection) ? record.connection : record;
   const usage = isRecord(record.usage) ? record.usage : {};
 
   return {
@@ -326,13 +327,6 @@ function mapDashboardSummary(raw: unknown): DashboardSummary {
       ownerDiscordUserId: readString(owner, "ownerDiscordUserId") ?? "0",
       role: readOwnerRole(owner.role),
       managedMemberCount: readNumber(owner, "managedMemberCount"),
-    },
-    connection: {
-      status: readConnectionStatus(
-        connection.status ?? connection.connectionStatus,
-      ),
-      lastCheckedAt: readString(connection, "lastCheckedAt"),
-      activeConnectionCount: readNumber(connection, "activeConnectionCount"),
     },
     usage: {
       periodLabel: readString(usage, "periodLabel") ?? "直近30日",
@@ -358,11 +352,6 @@ export function dashboardFromOwnerMe(owner: OwnerMeResponse): DashboardSummary {
       ownerDiscordUserId: owner.ownerDiscordUserId,
       role: owner.role,
       managedMemberCount: null,
-    },
-    connection: {
-      status: owner.connectionStatus,
-      lastCheckedAt: null,
-      activeConnectionCount: null,
     },
     usage: {
       periodLabel: "直近30日",
@@ -427,26 +416,6 @@ function mapAutomatedTriggerSources(raw: unknown): AutomatedTriggerSource[] {
   }));
 }
 
-function mapConnectionSummary(raw: unknown): ConnectionSummary {
-  const record = isRecord(raw) ? raw : {};
-  return {
-    ownerDiscordUserId: readString(record, "ownerDiscordUserId") ?? "0",
-    status: readConnectionStatus(record.status ?? record.connectionStatus),
-    lastCheckedAt: readString(record, "lastCheckedAt"),
-    needsReconnectReason: readString(record, "needsReconnectReason"),
-  };
-}
-
-function mapActionResult(raw: unknown): OwnerActionResult {
-  const record = isRecord(raw) ? raw : {};
-  return {
-    status:
-      readString(record, "status") === "accepted" ? "accepted" : "unavailable",
-    title: readString(record, "title") ?? "操作を受け付けました",
-    redirectUrl: readString(record, "redirectUrl"),
-  };
-}
-
 export function createOwnerApiClient(fetchImpl: FetchLike = fetch) {
   return {
     getMe: (options: OwnerRequestOptions = {}) =>
@@ -505,22 +474,6 @@ export function createOwnerApiClient(fetchImpl: FetchLike = fetch) {
         "/automated-trigger-sources",
         options,
         mapAutomatedTriggerSources,
-      ),
-    getConnection: (options: OwnerRequestOptions = {}) =>
-      requestJson(fetchImpl, "/connection", options, mapConnectionSummary),
-    startReconnect: (options: OwnerRequestOptions = {}) =>
-      requestJson(
-        fetchImpl,
-        "/connection/reconnect",
-        { ...options, method: "POST" },
-        mapActionResult,
-      ),
-    revokeConnection: (options: OwnerRequestOptions = {}) =>
-      requestJson(
-        fetchImpl,
-        "/connection/revoke",
-        { ...options, method: "POST" },
-        mapActionResult,
       ),
   };
 }

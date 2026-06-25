@@ -6,6 +6,7 @@ export type BotConfig = {
   apiBaseUrl: string;
   cloudflareAccessClientId: string;
   cloudflareAccessClientSecret: string;
+  localAuthBypassSecret: string | null;
   devGuildId: string | null;
   devAllowedDiscordUserIds: readonly string[];
   defaultModel: string;
@@ -61,6 +62,7 @@ export function loadBotConfig(env: NodeJS.ProcessEnv = process.env): BotConfig {
         env,
         "CF_ACCESS_CLIENT_SECRET",
       ),
+      localAuthBypassSecret: null,
       devGuildId: null,
       devAllowedDiscordUserIds: [],
       defaultModel: env.DC_CHATBOT_MODEL ?? "fake-model",
@@ -88,6 +90,7 @@ export function loadBotConfig(env: NodeJS.ProcessEnv = process.env): BotConfig {
     apiBaseUrl: readRequired(env, "DC_CHATBOT_API_BASE_URL"),
     cloudflareAccessClientId: readRequired(env, "CF_ACCESS_CLIENT_ID"),
     cloudflareAccessClientSecret: readRequired(env, "CF_ACCESS_CLIENT_SECRET"),
+    localAuthBypassSecret: readRequired(env, "LOCAL_AUTH_BYPASS_SECRET"),
     devGuildId: readRequired(env, "DISCORD_DEV_GUILD_ID"),
     devAllowedDiscordUserIds: readDiscordUserIdList(
       env,

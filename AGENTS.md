@@ -134,7 +134,7 @@ packages/provider/ # ChatGPT/Codex subscription backend adapter
 
 ## Tooling / workspace
 
-- Node.js: `22` (`.node-version`)
+- Node.js: `24` (`.node-version`)
 - Package manager: `pnpm@10.25.0`
 - Workspace: `apps/*`, `packages/*`
 - TypeScript は strict mode を前提にします。

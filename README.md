@@ -285,7 +285,7 @@ Message content と Conversation Context は必要時に transient に処理し�
 
 ## Tooling
 
-- Node.js: `22` (`.node-version`)
+- Node.js: `24` (`.node-version`)
 - Package manager: `pnpm@10.25.0`
 - Workspace: `apps/*`, `packages/*`
 - TypeScript: strict mode

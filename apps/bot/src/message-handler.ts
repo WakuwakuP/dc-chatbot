@@ -12,14 +12,16 @@ import type { BotApiClient } from "./api-client";
 import type { BotConfig } from "./config";
 import { splitDiscordReply } from "./reply-split";
 
+export type BotEventLogger = {
+  info(message: string, metadata: Record<string, unknown>): void;
+};
+
 export const BOT_API_UNAVAILABLE_MESSAGE =
   "現在 Bot API に接続できません。時間をおいてもう一度お試しください。";
 export const CONTEXT_FETCH_FAILED_MESSAGE =
   "会話の文脈を取得できませんでした。もう一度メッセージを送ってください。";
 export const RESPONSE_GENERATION_FAILED_MESSAGE =
   "現在回答を生成できません。時間をおいてもう一度お試しください。";
-export const CONNECTION_UNAVAILABLE_MESSAGE =
-  "現在 ChatGPT Subscription Connection を利用できません。Owner Discord User に接続状態の確認を依頼してください。";
 
 const TYPING_REFRESH_INTERVAL_MS = 8_000;
 const MAX_CONTEXT_MESSAGE_CONTENT_LENGTH = 2_000;
@@ -68,6 +70,28 @@ function isGuildMention(message: Message, client: Client): boolean {
 
 function isAutomatedMessage(message: Message): boolean {
   return message.author.bot || message.webhookId !== null;
+}
+
+function logDiscordMessageReceived(
+  message: Message,
+  client: Client,
+  logger: BotEventLogger,
+): void {
+  logger.info("dc-chatbot Discord message received", {
+    eventType: "discord_message_received",
+    messageId: message.id,
+    channelId: message.channelId,
+    guildId: message.guildId ?? null,
+    authorDiscordUserId: message.author.id,
+    authorIsBot: message.author.bot,
+    authorIsWebhook: message.webhookId !== null,
+    isDirectMessage: isDirectMessage(message),
+    mentionsBot: isGuildMention(message, client),
+    isSelf: message.author.id === client.user?.id,
+    attachmentCount: message.attachments.size,
+    contentLength: message.content.length,
+    createdAt: new Date(message.createdTimestamp).toISOString(),
+  });
 }
 
 function getTriggerKind(message: Message, client: Client): TriggerKind | null {
@@ -505,7 +529,10 @@ export async function handleDiscordMessageCreate(
   client: Client,
   config: BotConfig,
   apiClient: BotApiClient,
+  logger: BotEventLogger = console,
 ): Promise<void> {
+  logDiscordMessageReceived(message, client, logger);
+
   if (message.author.id === client.user?.id) {
     return;
   }
@@ -532,12 +559,6 @@ export async function handleDiscordMessageCreate(
   }
 
   if (!shouldProceedToRespond(intakeResponse)) {
-    if (
-      intakeResponse.reason === "connection_unavailable" &&
-      !shouldAvoidAutomatedReply
-    ) {
-      await safeReply(message, CONNECTION_UNAVAILABLE_MESSAGE);
-    }
     return;
   }
 
@@ -583,12 +604,17 @@ export function registerDiscordMessageHandlers(
   client: Client,
   config: BotConfig,
   apiClient: BotApiClient,
+  logger: BotEventLogger = console,
 ): void {
   client.on("messageCreate", (message) => {
-    void handleDiscordMessageCreate(message, client, config, apiClient).catch(
-      () => {
-        // Keep logs metadata-only. The next message can still be processed by discord.js.
-      },
-    );
+    void handleDiscordMessageCreate(
+      message,
+      client,
+      config,
+      apiClient,
+      logger,
+    ).catch(() => {
+      // Keep logs metadata-only. The next message can still be processed by discord.js.
+    });
   });
 }

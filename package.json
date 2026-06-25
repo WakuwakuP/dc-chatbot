@@ -3,9 +3,12 @@
   "private": true,
   "packageManager": "pnpm@10.25.0",
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=24.0.0"
   },
   "scripts": {
+    "dev:prepare": "pnpm --filter @dc-chatbot/api dev:prepare",
+    "dev": "node scripts/dev.mjs",
+    "dev:all": "node scripts/dev.mjs --with-bot",
     "check": "pnpm -r --filter @dc-chatbot/shared --filter @dc-chatbot/domain --filter @dc-chatbot/data --filter @dc-chatbot/provider --filter @dc-chatbot/api --filter @dc-chatbot/bot --filter @dc-chatbot/web --if-present check",
     "build": "pnpm -r --filter @dc-chatbot/shared --filter @dc-chatbot/domain --filter @dc-chatbot/data --filter @dc-chatbot/provider --filter @dc-chatbot/api --filter @dc-chatbot/bot --filter @dc-chatbot/web --if-present build",
     "lint": "oxlint . --ignore-path .oxlintignore",
@@ -19,7 +22,7 @@
     "spike:dev": "pnpm --filter api-spike dev"
   },
   "devDependencies": {
-    "@types/node": "^22.10.2",
+    "@types/node": "^24.0.0",
     "oxlint": "^1.28.0",
     "prettier": "^3.4.2",
     "typescript": "^5.9.3",

@@ -54,7 +54,7 @@
 - Provider-specific protocol、token handling、safe error mapping は adapter に閉じ込めます。
 - Provider output は内部的には streaming し、Discord には最終応答または分割済み chunk を投稿します。
 
-関連 ADR: 0016, 0017, 0018, 0033, 0034, 0041, 0042, 0052
+関連 ADR: 0016, 0017, 0018, 0033, 0034, 0041, 0042, 0052, 0058
 
 ### 本実装の workspace / directory structure
 
@@ -141,6 +141,7 @@
 | [0055](0055-use-targeted-d1-indexes-and-core-foreign-keys.md)                | Use targeted D1 indexes and core foreign keys                                   |
 | [0056](0056-use-drizzle-for-d1-data-layer.md)                                | Use Drizzle ORM for the D1 data layer                                           |
 | [0057](0057-use-vite-react-router-tailwind-shadcn-for-web-frontend.md)       | Use Vite, React, React Router, Tailwind CSS, and shadcn/ui for the web frontend |
+| [0058](0058-support-nvidia-nim-llm-provider.md)                              | Support NVIDIA NIM as an LLM provider                                           |
 
 ## 新しい ADR を追加するとき
 

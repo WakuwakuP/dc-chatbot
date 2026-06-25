@@ -32,7 +32,6 @@ describe("Owner UI routes", () => {
     expect(renderRoute("/automated-trigger-sources")).toContain(
       "Automated Trigger Sources",
     );
-    expect(renderRoute("/connection")).toContain("Connection status");
   });
 });
 
@@ -76,12 +75,6 @@ describe("Owner API client", () => {
             ownerDiscordUserId: "123456789012345678",
             role: "admin_owner",
             managedMemberCount: 2,
-            extra: "discarded-extra-field",
-          },
-          connection: {
-            status: "connected",
-            lastCheckedAt: "2026-06-20T00:00:00.000Z",
-            activeConnectionCount: 1,
             extra: "discarded-extra-field",
           },
           usage: {

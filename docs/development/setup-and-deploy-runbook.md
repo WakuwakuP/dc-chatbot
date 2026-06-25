@@ -22,7 +22,7 @@
 
 ### 1.1 前提
 
-- Node.js `22` (`.node-version`)
+- Node.js `24` (`.node-version`)
 - pnpm `10.25.0`
 - Docker / Docker Compose
 - local Bot を動かす場合のみ、development 用 Discord Application / Bot
@@ -67,13 +67,26 @@ Bot Worker は実際の Discord Gateway に接続するため、明示的に `bo
 
 1. development 用 Discord Application / Bot を作成します。
 2. `.env` に development 用の値だけを設定します。
+   - `DC_CHATBOT_ALLOW_DEV_BOT=true`
    - `DISCORD_DEV_TOKEN`
    - `DISCORD_DEV_GUILD_ID`
-3. `.env` の `DISCORD_TOKEN` は空のままにします。
-4. 起動します。
+   - `DISCORD_DEV_ALLOWED_USER_IDS`
+3. host process の `pnpm dev:all` で起動する場合は、local service 用の値も `.env` に設定します。
+   - `DC_CHATBOT_API_BASE_URL=http://127.0.0.1:8787`
+   - `CF_ACCESS_CLIENT_ID=local-dev-client-id`
+   - `CF_ACCESS_CLIENT_SECRET=local-dev-client-secret`
+   - `LOCAL_AUTH_BYPASS_SECRET=local-auth-bypass-secret`
+4. `.env` の `DISCORD_TOKEN` は空のままにします。
+5. 起動します。
 
 ```bash
 docker compose --profile bot up bot
+```
+
+host process で起動する場合は、root の dev launcher が `.env` を読み込んで API/Web/Bot に渡します。
+
+```bash
+pnpm dev:all
 ```
 
 local Bot Worker は次を満たさない場合に起動を拒否します。
@@ -81,6 +94,7 @@ local Bot Worker は次を満たさない場合に起動を拒否します。
 - `DC_CHATBOT_ALLOW_DEV_BOT=true`
 - `DISCORD_DEV_TOKEN` が設定されている
 - `DISCORD_DEV_GUILD_ID` が設定されている
+- `DISCORD_DEV_ALLOWED_USER_IDS` が設定されている
 
 `docker-compose.yml` は host 側の production `DISCORD_TOKEN` を container に渡さないよう、明示的に空文字を渡します。
 

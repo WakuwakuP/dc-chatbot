@@ -17,7 +17,6 @@ const navigation = [
   { to: "/", label: "ダッシュボード", adminOnly: false },
   { to: "/members", label: "Registered Members", adminOnly: false },
   { to: "/candidates", label: "Candidate Discord Users", adminOnly: false },
-  { to: "/connection", label: "Connection", adminOnly: false },
   { to: "/settings", label: "Settings", adminOnly: true },
   {
     to: "/automated-trigger-sources",
@@ -90,8 +89,7 @@ export function OwnerLayout() {
                 dc-chatbot Owner UI
               </h1>
               <p className="max-w-3xl text-sm text-muted">
-                Owner Discord User が ChatGPT Subscription
-                Connection、Registered Member、Candidate Discord
+                Owner Discord User が Registered Member、Candidate Discord
                 User、metadata-only audit を管理します。 本 UI は credential
                 material、Discord message content、prompt body、response
                 text、attachment data、provider raw body を保持しません。

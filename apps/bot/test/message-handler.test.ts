@@ -15,6 +15,7 @@ const BASE_CONFIG: BotConfig = {
   apiBaseUrl: "https://api.test",
   cloudflareAccessClientId: "client-id",
   cloudflareAccessClientSecret: "client-secret",
+  localAuthBypassSecret: null,
   devGuildId: "10",
   devAllowedDiscordUserIds: ["100"],
   defaultModel: "test-model",
@@ -43,6 +44,10 @@ function createClient(): Client {
       fetch: vi.fn(),
     },
   } as unknown as Client;
+}
+
+function createLogger() {
+  return { info: vi.fn() };
 }
 
 type MockChannel = {
@@ -105,6 +110,43 @@ function createMessage(options: {
 }
 
 describe("handleDiscordMessageCreate", () => {
+  it("logs received Discord message metadata without message content", async () => {
+    const channel = createChannel();
+    const message = createMessage({
+      id: "11",
+      authorId: "101",
+      channel,
+      content: "ログに出してはいけない本文",
+    });
+    const apiClient = createApiClient();
+    const logger = { info: vi.fn() };
+
+    await handleDiscordMessageCreate(
+      message,
+      createClient(),
+      BASE_CONFIG,
+      apiClient,
+      logger,
+    );
+
+    expect(logger.info).toHaveBeenCalledWith(
+      "dc-chatbot Discord message received",
+      expect.objectContaining({
+        eventType: "discord_message_received",
+        messageId: "11",
+        channelId: "20",
+        guildId: null,
+        authorDiscordUserId: "101",
+        isDirectMessage: true,
+        contentLength: "ログに出してはいけない本文".length,
+      }),
+    );
+    expect(JSON.stringify(logger.info.mock.calls)).not.toContain(
+      "ログに出してはいけない本文",
+    );
+    expect(apiClient.intakeMessage).not.toHaveBeenCalled();
+  });
+
   it("ignores development DMs from users outside the dev allowlist", async () => {
     const channel = createChannel();
     const message = createMessage({ id: "1", authorId: "101", channel });
@@ -115,6 +157,7 @@ describe("handleDiscordMessageCreate", () => {
       createClient(),
       BASE_CONFIG,
       apiClient,
+      createLogger(),
     );
 
     expect(apiClient.intakeMessage).not.toHaveBeenCalled();
@@ -132,6 +175,7 @@ describe("handleDiscordMessageCreate", () => {
       createClient(),
       BASE_CONFIG,
       apiClient,
+      createLogger(),
     );
 
     expect(message.reply).toHaveBeenCalledWith(BOT_API_UNAVAILABLE_MESSAGE);
@@ -158,6 +202,7 @@ describe("handleDiscordMessageCreate", () => {
       createClient(),
       BASE_CONFIG,
       apiClient,
+      createLogger(),
     );
 
     expect(message.reply).toHaveBeenCalledWith(CONTEXT_FETCH_FAILED_MESSAGE);
@@ -213,6 +258,7 @@ describe("handleDiscordMessageCreate", () => {
       createClient(),
       BASE_CONFIG,
       apiClient,
+      createLogger(),
     );
 
     expect(apiClient.requestResponse).toHaveBeenCalledWith(
@@ -246,6 +292,7 @@ describe("handleDiscordMessageCreate", () => {
       createClient(),
       BASE_CONFIG,
       apiClient,
+      createLogger(),
     );
 
     expect(message.reply).toHaveBeenCalledWith(

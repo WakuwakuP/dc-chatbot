@@ -3,8 +3,9 @@ import type {
   TriggerKind,
 } from "@dc-chatbot/shared";
 
+export type LLMProviderKind = "fake" | "nvidia_nim";
+
 export type SafeProviderErrorCategory =
-  | "needs_reconnect"
   | "rate_limited"
   | "temporary_unavailable"
   | "policy_rejected"
@@ -12,7 +13,6 @@ export type SafeProviderErrorCategory =
 
 export type ProviderGenerateRequest = {
   requestId: string;
-  effectiveConnectionId: string;
   model: string;
   triggerKind: TriggerKind;
   conversationContextMessageIds: readonly string[];
@@ -25,36 +25,7 @@ export type ProviderGenerateResponse = {
   model: string;
 };
 
-export type BeginConnectionFlowRequest = {
-  connectionFlowStateId: string;
-  state: string;
-  expiresAt: string;
-};
-
-export type BeginConnectionFlowResponse = {
-  providerKind: "fake";
-  authorizationUrl: string;
-};
-
-export type CompleteConnectionFlowRequest = {
-  connectionFlowStateId: string;
-  state: string;
-  opaqueCredentialCiphertext: string;
-};
-
-export type CompleteConnectionFlowResponse = {
-  providerKind: "fake";
-  credentialCiphertext: string;
-};
-
-export interface ChatGPTSubscriptionProvider {
-  beginConnectionFlow(
-    request: BeginConnectionFlowRequest,
-  ): Promise<BeginConnectionFlowResponse>;
-  completeConnectionFlow(
-    request: CompleteConnectionFlowRequest,
-  ): Promise<CompleteConnectionFlowResponse>;
-  revokeConnection(connectionId: string): Promise<void>;
+export interface LLMProvider {
   generateResponse(
     request: ProviderGenerateRequest,
   ): Promise<ProviderGenerateResponse>;

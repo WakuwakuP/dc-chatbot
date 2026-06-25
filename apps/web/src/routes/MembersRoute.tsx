@@ -192,8 +192,7 @@ export function MembersRoute() {
           </Button>
           {regularOwner ? (
             <p className="text-xs text-muted">
-              Regular Owner が追加した member は、自分の ChatGPT Subscription
-              Connection に割り当てられます。
+              Regular Owner が追加した member は、自分に割り当てられます。
             </p>
           ) : null}
         </CardContent>

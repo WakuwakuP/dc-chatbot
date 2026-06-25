@@ -46,9 +46,6 @@ describe("buildRetentionCleanupPlan", () => {
       "request_audit_metadata",
     );
     expect(plan.map((item) => item.tableName)).toContain("owner_notifications");
-    expect(plan.map((item) => item.tableName)).toContain(
-      "connection_flow_states",
-    );
     expect(
       plan.find((item) => item.tableName === "candidate_discord_users")?.sql,
     ).toContain("expires_at");

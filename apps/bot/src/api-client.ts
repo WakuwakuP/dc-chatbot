@@ -20,6 +20,7 @@ export type BotApiClientOptions = {
   apiBaseUrl: string;
   cloudflareAccessClientId: string;
   cloudflareAccessClientSecret: string;
+  localAuthBypassSecret?: string | null;
   fetch?: typeof globalThis.fetch;
   retryPolicy?: Partial<BotApiRetryPolicy>;
 };
@@ -83,13 +84,19 @@ export function createBotApiClient(options: BotApiClientOptions): BotApiClient {
 
     for (let attempt = 1; attempt <= retryPolicy.maxAttempts; attempt += 1) {
       try {
+        const headers: Record<string, string> = {
+          "content-type": "application/json",
+          "cf-access-client-id": options.cloudflareAccessClientId,
+          "cf-access-client-secret": options.cloudflareAccessClientSecret,
+        };
+        if (options.localAuthBypassSecret) {
+          headers["x-dev-auth-secret"] = options.localAuthBypassSecret;
+          headers["x-dev-bot-service"] = "true";
+        }
+
         const init: RequestInit = {
           method: request.method,
-          headers: {
-            "content-type": "application/json",
-            "cf-access-client-id": options.cloudflareAccessClientId,
-            "cf-access-client-secret": options.cloudflareAccessClientSecret,
-          },
+          headers,
         };
         if (request.method === "POST") {
           init.body = JSON.stringify(request.body);

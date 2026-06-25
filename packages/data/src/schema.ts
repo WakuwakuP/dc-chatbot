@@ -63,30 +63,6 @@ export const candidateDiscordUsers = sqliteTable(
   ],
 );
 
-export const chatgptSubscriptionConnections = sqliteTable(
-  "chatgpt_subscription_connections",
-  {
-    connectionId: text("connection_id").primaryKey(),
-    ownerDiscordUserId: text("owner_discord_user_id").notNull(),
-    status: text("status", {
-      enum: ["active", "needs_reconnect", "revoked"],
-    }).notNull(),
-    encryptedCredentialCiphertext: text(
-      "encrypted_credential_ciphertext",
-    ).notNull(),
-    credentialVersion: integer("credential_version").notNull(),
-    createdAt: text("created_at").notNull(),
-    updatedAt: text("updated_at").notNull(),
-  },
-  (table) => [
-    index("connections_owner_idx").on(table.ownerDiscordUserId),
-    index("connections_owner_status_idx").on(
-      table.ownerDiscordUserId,
-      table.status,
-    ),
-  ],
-);
-
 export const requestAuditMetadata = sqliteTable(
   "request_audit_metadata",
   {
@@ -116,7 +92,7 @@ export const providerCallAuditMetadata = sqliteTable(
   {
     providerCallId: text("provider_call_id").primaryKey(),
     requestId: text("request_id").notNull(),
-    connectionId: text("connection_id").notNull(),
+    providerRef: text("provider_ref").notNull(),
     model: text("model").notNull(),
     status: text("status", {
       enum: ["started", "completed", "failed"],
@@ -321,31 +297,6 @@ export const discordResponseMessages = sqliteTable(
   ],
 );
 
-export const connectionFlowStates = sqliteTable(
-  "connection_flow_states",
-  {
-    connectionFlowStateId: text("connection_flow_state_id").primaryKey(),
-    ownerDiscordUserId: text("owner_discord_user_id").notNull(),
-    providerKind: text("provider_kind", { enum: ["fake"] }).notNull(),
-    stateHash: text("state_hash").notNull(),
-    status: text("status", {
-      enum: ["pending", "completed", "expired", "failed"],
-    }).notNull(),
-    requestedAt: text("requested_at").notNull(),
-    expiresAt: text("expires_at").notNull(),
-    completedAt: text("completed_at"),
-    retainUntil: text("retain_until").notNull(),
-  },
-  (table) => [
-    index("connection_flow_owner_status_idx").on(
-      table.ownerDiscordUserId,
-      table.status,
-    ),
-    index("connection_flow_expires_at_idx").on(table.expiresAt),
-    index("connection_flow_retain_until_idx").on(table.retainUntil),
-  ],
-);
-
 export const cleanupRunMetadata = sqliteTable(
   "cleanup_run_metadata",
   {
@@ -363,27 +314,4 @@ export const cleanupRunMetadata = sqliteTable(
     index("cleanup_run_retain_until_idx").on(table.retainUntil),
     index("cleanup_run_started_at_idx").on(table.startedAt),
   ],
-);
-
-export const generationLocks = sqliteTable(
-  "generation_locks",
-  {
-    connectionId: text("connection_id").primaryKey(),
-    lockId: text("lock_id").notNull(),
-    requestId: text("request_id").notNull(),
-    lockedUntil: text("locked_until").notNull(),
-    createdAt: text("created_at").notNull(),
-  },
-  (table) => [index("generation_locks_locked_until_idx").on(table.lockedUntil)],
-);
-
-export const refreshLocks = sqliteTable(
-  "refresh_locks",
-  {
-    connectionId: text("connection_id").primaryKey(),
-    lockId: text("lock_id").notNull(),
-    lockedUntil: text("locked_until").notNull(),
-    createdAt: text("created_at").notNull(),
-  },
-  (table) => [index("refresh_locks_locked_until_idx").on(table.lockedUntil)],
 );

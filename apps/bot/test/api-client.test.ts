@@ -70,6 +70,28 @@ describe("createBotApiClient", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("sends local auth bypass headers when configured", async () => {
+    const fetchMock = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(createResponse(HEALTH_RESPONSE));
+
+    const client = createBotApiClient({
+      apiBaseUrl: "https://api.test/",
+      cloudflareAccessClientId: "client-id",
+      cloudflareAccessClientSecret: "client-secret",
+      localAuthBypassSecret: "local-auth-bypass-secret",
+      fetch: fetchMock,
+    });
+
+    await client.checkHealth();
+
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    expect(new Headers(init?.headers).get("x-dev-auth-secret")).toBe(
+      "local-auth-bypass-secret",
+    );
+    expect(new Headers(init?.headers).get("x-dev-bot-service")).toBe("true");
+  });
+
   it("does not retry non-transient 4xx responses", async () => {
     const fetchMock = vi
       .fn<typeof globalThis.fetch>()

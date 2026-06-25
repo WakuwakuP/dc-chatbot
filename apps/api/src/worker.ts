@@ -2,20 +2,22 @@ import {
   D1DcChatbotRepository,
   addDaysIso,
   buildRetentionCleanupPlan,
-  type AllowedDiscordUserRecord,
   type AutomatedTriggerSourceRecord,
   type OwnerRecord,
 } from "@dc-chatbot/data";
 import {
   canManageOwnerSettings,
-  resolveEffectiveChatGPTSubscriptionConnection,
 } from "@dc-chatbot/domain";
-import { createChatGPTSubscriptionProvider } from "@dc-chatbot/provider";
+import {
+  ProviderError,
+  createLLMProvider,
+  type CreateLLMProviderOptions,
+  type ProviderGenerateResponse,
+} from "@dc-chatbot/provider";
 import {
   BotMessageIntakeRequestSchema,
   BotOwnerNotificationDeliveryUpdateRequestSchema,
   BotRespondRequestSchema,
-  CompleteConnectionFlowRequestSchema,
   CreateAutomatedTriggerSourceRequestSchema,
   CreateRegisteredMemberRequestSchema,
   DiscordResponseMessageMetadataRequestSchema,
@@ -25,10 +27,8 @@ import {
   UpdateModelSettingsRequestSchema,
   UpdatePromptSettingsMetadataRequestSchema,
   createUlid,
-  type BeginConnectionFlowResponse,
   type BotMessageIntakeResponse,
   type BotRespondResponse,
-  type ChatGPTSubscriptionConnectionStatusResponse,
   type ContextFetchPlan,
   type HealthResponse,
   type OwnerDashboardSummaryResponse,
@@ -48,8 +48,9 @@ export type Env = {
   CF_ACCESS_AUD?: string;
   CF_ACCESS_CLIENT_ID?: string;
   CF_ACCESS_CLIENT_SECRET?: string;
-  CHATGPT_CREDENTIAL_MASTER_KEY_CURRENT?: string;
-  DEFAULT_FAKE_CONNECTION_ID?: string;
+  LLM_PROVIDER?: "fake" | "nvidia_nim";
+  NVIDIA_NIM_BEARER_TOKEN?: string;
+  NVIDIA_NIM_BASE_URL?: string;
 };
 
 const JSON_HEADERS = {
@@ -100,35 +101,40 @@ function createRepository(env: Env): D1DcChatbotRepository | null {
   return env.DB ? new D1DcChatbotRepository(env.DB) : null;
 }
 
-type CredentialEncryptionContext = {
-  ownerDiscordUserId: string;
-  connectionFlowStateId: string;
-  connectionId: string;
-};
+function createLLMProviderOptions(env: Env): CreateLLMProviderOptions {
+  if (env.LLM_PROVIDER !== "nvidia_nim") {
+    return { providerKind: "fake" };
+  }
 
-type CredentialEnvelopeAuthenticatedData = CredentialEncryptionContext & {
-  envelopeType: "chatgpt_subscription_connection_credential";
-  envelopeVersion: 2;
-  credentialAlg: "AES-GCM";
-  keyWrapAlg: "AES-GCM";
-  masterKeyId: "current";
-};
+  const nvidiaNim = env.NVIDIA_NIM_BASE_URL
+    ? {
+        bearerToken: env.NVIDIA_NIM_BEARER_TOKEN ?? "",
+        baseUrl: env.NVIDIA_NIM_BASE_URL,
+      }
+    : {
+        bearerToken: env.NVIDIA_NIM_BEARER_TOKEN ?? "",
+      };
+  return { providerKind: "nvidia_nim", nvidiaNim };
+}
 
-type CredentialEncryptionEnvelope = {
-  v: 2;
-  credentialAlg: "AES-GCM";
-  keyWrapAlg: "AES-GCM";
-  masterKeyId: "current";
-  additionalAuthenticatedData: CredentialEnvelopeAuthenticatedData;
-  credentialIv: string;
-  credentialCiphertext: string;
-  wrappedDataKeyIv: string;
-  wrappedDataKeyCiphertext: string;
-};
+function safeProviderErrorCategory(error: unknown): string {
+  return error instanceof ProviderError ? error.safeCategory : "unknown";
+}
 
-const CREDENTIAL_MASTER_KEY_BYTES = 32;
-const CREDENTIAL_DATA_ENCRYPTION_KEY_BYTES = 32;
-const AES_GCM_IV_BYTES = 12;
+function providerErrorStatus(category: string): number {
+  switch (category) {
+    case "rate_limited":
+      return 429;
+    case "policy_rejected":
+      return 422;
+    case "temporary_unavailable":
+      return 503;
+    default:
+      return 502;
+  }
+}
+
+const ACCESS_JWT_CLOCK_TOLERANCE_SECONDS = 60;
 
 function decodeBase64OrBase64Url(value: string): Uint8Array | null {
   const normalized = value.trim().replaceAll("-", "+").replaceAll("_", "/");
@@ -153,132 +159,6 @@ function decodeBase64OrBase64Url(value: string): Uint8Array | null {
     return null;
   }
 }
-
-function encodeBase64(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-  return btoa(binary);
-}
-
-function buildCredentialEnvelopeAuthenticatedData(
-  context: CredentialEncryptionContext,
-): CredentialEnvelopeAuthenticatedData {
-  return {
-    envelopeType: "chatgpt_subscription_connection_credential",
-    envelopeVersion: 2,
-    credentialAlg: "AES-GCM",
-    keyWrapAlg: "AES-GCM",
-    masterKeyId: "current",
-    ownerDiscordUserId: context.ownerDiscordUserId,
-    connectionFlowStateId: context.connectionFlowStateId,
-    connectionId: context.connectionId,
-  };
-}
-
-function encodeCredentialEnvelopeAuthenticatedData(
-  additionalAuthenticatedData: CredentialEnvelopeAuthenticatedData,
-): Uint8Array {
-  return new TextEncoder().encode(
-    JSON.stringify({
-      envelopeType: additionalAuthenticatedData.envelopeType,
-      envelopeVersion: additionalAuthenticatedData.envelopeVersion,
-      credentialAlg: additionalAuthenticatedData.credentialAlg,
-      keyWrapAlg: additionalAuthenticatedData.keyWrapAlg,
-      masterKeyId: additionalAuthenticatedData.masterKeyId,
-      ownerDiscordUserId: additionalAuthenticatedData.ownerDiscordUserId,
-      connectionFlowStateId: additionalAuthenticatedData.connectionFlowStateId,
-      connectionId: additionalAuthenticatedData.connectionId,
-    }),
-  );
-}
-
-async function encryptCredentialEnvelope(
-  plaintextCredential: string,
-  env: Env,
-  context: CredentialEncryptionContext,
-): Promise<string | null> {
-  const masterKeyBytes = env.CHATGPT_CREDENTIAL_MASTER_KEY_CURRENT
-    ? decodeBase64OrBase64Url(env.CHATGPT_CREDENTIAL_MASTER_KEY_CURRENT)
-    : null;
-  if (
-    !masterKeyBytes ||
-    masterKeyBytes.byteLength !== CREDENTIAL_MASTER_KEY_BYTES
-  ) {
-    return null;
-  }
-
-  const dataKeyBytes = crypto.getRandomValues(
-    new Uint8Array(CREDENTIAL_DATA_ENCRYPTION_KEY_BYTES),
-  );
-
-  try {
-    const masterKey = await crypto.subtle.importKey(
-      "raw",
-      masterKeyBytes,
-      { name: "AES-GCM" },
-      false,
-      ["encrypt"],
-    );
-    const dataKey = await crypto.subtle.importKey(
-      "raw",
-      dataKeyBytes,
-      { name: "AES-GCM" },
-      false,
-      ["encrypt"],
-    );
-    const additionalAuthenticatedData =
-      buildCredentialEnvelopeAuthenticatedData(context);
-    const additionalDataBytes = encodeCredentialEnvelopeAuthenticatedData(
-      additionalAuthenticatedData,
-    );
-    const credentialIv = crypto.getRandomValues(
-      new Uint8Array(AES_GCM_IV_BYTES),
-    );
-    const credentialCiphertext = await crypto.subtle.encrypt(
-      {
-        name: "AES-GCM",
-        iv: credentialIv,
-        additionalData: additionalDataBytes,
-      },
-      dataKey,
-      new TextEncoder().encode(plaintextCredential),
-    );
-    const wrappedDataKeyIv = crypto.getRandomValues(
-      new Uint8Array(AES_GCM_IV_BYTES),
-    );
-    const wrappedDataKeyCiphertext = await crypto.subtle.encrypt(
-      {
-        name: "AES-GCM",
-        iv: wrappedDataKeyIv,
-        additionalData: additionalDataBytes,
-      },
-      masterKey,
-      dataKeyBytes,
-    );
-    const envelope: CredentialEncryptionEnvelope = {
-      v: 2,
-      credentialAlg: "AES-GCM",
-      keyWrapAlg: "AES-GCM",
-      masterKeyId: "current",
-      additionalAuthenticatedData,
-      credentialIv: encodeBase64(credentialIv),
-      credentialCiphertext: encodeBase64(new Uint8Array(credentialCiphertext)),
-      wrappedDataKeyIv: encodeBase64(wrappedDataKeyIv),
-      wrappedDataKeyCiphertext: encodeBase64(
-        new Uint8Array(wrappedDataKeyCiphertext),
-      ),
-    };
-    return JSON.stringify(envelope);
-  } catch {
-    return null;
-  } finally {
-    dataKeyBytes.fill(0);
-  }
-}
-
-const ACCESS_JWT_CLOCK_TOLERANCE_SECONDS = 60;
 
 type AccessJwtHeader = {
   alg?: unknown;
@@ -572,9 +452,6 @@ async function authenticateOwner(
     const owner: OwnerMeResponse = {
       ownerDiscordUserId: record.ownerDiscordUserId,
       role: record.role,
-      connectionStatus: await repository.getOwnerConnectionStatus(
-        record.ownerDiscordUserId,
-      ),
     };
     return { owner, record, repository };
   }
@@ -596,7 +473,7 @@ async function authenticateOwner(
     return {
       record,
       repository: null,
-      owner: { ...record, connectionStatus: "missing" },
+      owner: { ...record },
     };
   }
 
@@ -938,61 +815,6 @@ async function handleBotMessageIntake(
   return jsonResponse(response);
 }
 
-async function resolveEffectiveConnectionId(
-  repository: D1DcChatbotRepository,
-  allowedUser: AllowedDiscordUserRecord,
-): Promise<string | null> {
-  const directConnection =
-    allowedUser.kind === "owner"
-      ? await repository.findActiveConnectionForOwner(allowedUser.discordUserId)
-      : null;
-  const assignedOwnerConnection = await repository.findActiveConnectionForOwner(
-    allowedUser.assignedOwnerDiscordUserId,
-  );
-
-  const resolution = resolveEffectiveChatGPTSubscriptionConnection({
-    directConnection: directConnection
-      ? {
-          id: directConnection.connectionId,
-          ownerDiscordUserId: directConnection.ownerDiscordUserId,
-          status: directConnection.status,
-        }
-      : null,
-    assignedOwnerConnection: assignedOwnerConnection
-      ? {
-          id: assignedOwnerConnection.connectionId,
-          ownerDiscordUserId: assignedOwnerConnection.ownerDiscordUserId,
-          status: assignedOwnerConnection.status,
-        }
-      : null,
-  });
-
-  return resolution.connection?.id ?? null;
-}
-
-async function persistSelectedContextMessageIds(
-  repository: D1DcChatbotRepository,
-  requestId: string,
-  messageIds: readonly string[],
-  nowIsoUtc: string,
-  contextSource: string,
-): Promise<void> {
-  const uniqueMessageIds = [...new Set(messageIds)];
-  await Promise.all(
-    uniqueMessageIds.map((discordMessageId) =>
-      repository.insertSelectedContextMessage({
-        selectedContextId: createUlid(),
-        requestId,
-        discordMessageId,
-        contextSource,
-        authorRelation: null,
-        createdAt: nowIsoUtc,
-        retainUntil: addDaysIso(nowIsoUtc, 30),
-      }),
-    ),
-  );
-}
-
 async function handleBotRespond(request: Request, env: Env): Promise<Response> {
   if (!authenticateBotService(request, env)) {
     return problemResponse(401, "unauthorized", "Unauthorized");
@@ -1015,10 +837,7 @@ async function handleBotRespond(request: Request, env: Env): Promise<Response> {
 
   const startedAt = Date.now();
   const nowIsoUtc = new Date(startedAt).toISOString();
-  let effectiveConnectionId =
-    respondRequest.effectiveConnectionId ??
-    env.DEFAULT_FAKE_CONNECTION_ID ??
-    null;
+  let providerRef = "local";
 
   if (repository) {
     if (respondRequest.triggerKind === "automated_trigger_source") {
@@ -1029,12 +848,24 @@ async function handleBotRespond(request: Request, env: Env): Promise<Response> {
             respondRequest.triggerAuthorApplicationId ?? null,
         },
       );
-      const assignedConnection = automatedSource
-        ? await repository.findActiveConnectionForOwner(
-            automatedSource.assignedOwnerDiscordUserId,
-          )
-        : null;
-      effectiveConnectionId = assignedConnection?.connectionId ?? null;
+      if (!automatedSource) {
+        await recordAudit(repository, {
+          actorType: "bot_service",
+          requestId: respondRequest.requestId,
+          eventType: "bot.message_respond.non_allowed",
+          status: "rejected",
+          nowIsoUtc,
+          errorCategory: "non_allowed_user",
+          retentionDays: 30,
+        });
+        return problemResponse(
+          403,
+          "non_allowed_user",
+          "Discord User is not allowed",
+          respondRequest.requestId,
+        );
+      }
+      providerRef = automatedSource.assignedOwnerDiscordUserId;
     } else {
       const allowedUser = await repository.findAllowedDiscordUser(
         respondRequest.triggerAuthorDiscordUserId,
@@ -1056,39 +887,13 @@ async function handleBotRespond(request: Request, env: Env): Promise<Response> {
           respondRequest.requestId,
         );
       }
-      effectiveConnectionId = await resolveEffectiveConnectionId(
-        repository,
-        allowedUser,
-      );
-    }
-
-    if (!effectiveConnectionId) {
-      await recordAudit(repository, {
-        actorType: "bot_service",
-        requestId: respondRequest.requestId,
-        eventType: "bot.message_respond.connection_unavailable",
-        status: "failed",
-        nowIsoUtc,
-        errorCategory: "connection_unavailable",
-      });
-      return problemResponse(
-        409,
-        "connection_unavailable",
-        "Effective ChatGPT Subscription Connection is unavailable",
-        respondRequest.requestId,
-      );
+      providerRef = allowedUser.assignedOwnerDiscordUserId;
     }
   }
 
-  if (!effectiveConnectionId) {
-    effectiveConnectionId = "01HY0000000000000000000002";
-  }
-
-  const provider = createChatGPTSubscriptionProvider();
   const providerRequest = respondRequest.conversationContextMessages
     ? {
         requestId: respondRequest.requestId,
-        effectiveConnectionId,
         model: respondRequest.model,
         triggerKind: respondRequest.triggerKind,
         conversationContextMessageIds:
@@ -1097,13 +902,34 @@ async function handleBotRespond(request: Request, env: Env): Promise<Response> {
       }
     : {
         requestId: respondRequest.requestId,
-        effectiveConnectionId,
         model: respondRequest.model,
         triggerKind: respondRequest.triggerKind,
         conversationContextMessageIds:
           respondRequest.conversationContextMessageIds,
       };
-  const providerResponse = await provider.generateResponse(providerRequest);
+  let providerResponse: ProviderGenerateResponse;
+  try {
+    const provider = createLLMProvider(createLLMProviderOptions(env));
+    providerResponse = await provider.generateResponse(providerRequest);
+  } catch (error) {
+    const safeErrorCategory = safeProviderErrorCategory(error);
+    if (repository) {
+      await recordAudit(repository, {
+        actorType: "bot_service",
+        requestId: respondRequest.requestId,
+        eventType: "bot.message_respond.provider_failed",
+        status: "failed",
+        nowIsoUtc: new Date().toISOString(),
+        errorCategory: safeErrorCategory,
+      });
+    }
+    return problemResponse(
+      providerErrorStatus(safeErrorCategory),
+      "provider_unavailable",
+      "Provider unavailable",
+      respondRequest.requestId,
+    );
+  }
 
   if (repository) {
     const finishedAt = new Date().toISOString();
@@ -1111,7 +937,7 @@ async function handleBotRespond(request: Request, env: Env): Promise<Response> {
       repository.insertProviderCallAudit({
         providerCallId: providerResponse.providerCallId,
         requestId: respondRequest.requestId,
-        connectionId: effectiveConnectionId,
+        providerRef,
         model: providerResponse.model,
         status: "completed",
         safeErrorCategory: null,
@@ -1146,6 +972,29 @@ async function handleBotRespond(request: Request, env: Env): Promise<Response> {
     replyChunks: [providerResponse.replyText],
   };
   return jsonResponse(body);
+}
+
+async function persistSelectedContextMessageIds(
+  repository: D1DcChatbotRepository,
+  requestId: string,
+  messageIds: readonly string[],
+  nowIsoUtc: string,
+  contextSource: string,
+): Promise<void> {
+  const uniqueMessageIds = [...new Set(messageIds)];
+  await Promise.all(
+    uniqueMessageIds.map((discordMessageId) =>
+      repository.insertSelectedContextMessage({
+        selectedContextId: createUlid(),
+        requestId,
+        discordMessageId,
+        contextSource,
+        authorRelation: null,
+        createdAt: nowIsoUtc,
+        retainUntil: addDaysIso(nowIsoUtc, 30),
+      }),
+    ),
+  );
 }
 
 async function handleOwnerDashboard(
@@ -1581,212 +1430,6 @@ async function handleUpdateAutomatedSource(
   return jsonResponse(source);
 }
 
-async function handleGetConnection(
-  request: Request,
-  env: Env,
-): Promise<Response> {
-  const auth = await requireOwnerWithRepository(request, env);
-  if (auth instanceof Response) {
-    return auth;
-  }
-  const connection = await auth.repository.getLatestConnectionForOwner(
-    auth.owner.ownerDiscordUserId,
-  );
-  const body: ChatGPTSubscriptionConnectionStatusResponse = {
-    ownerDiscordUserId: auth.owner.ownerDiscordUserId,
-    connectionStatus: connection
-      ? connection.status === "active"
-        ? "connected"
-        : connection.status
-      : "missing",
-    connectionId: connection?.connectionId ?? null,
-    updatedAt: connection?.updatedAt ?? null,
-  };
-  return jsonResponse(body);
-}
-
-async function handleBeginConnectionFlow(
-  request: Request,
-  env: Env,
-): Promise<Response> {
-  const auth = await requireOwnerWithRepository(request, env);
-  if (auth instanceof Response) {
-    return auth;
-  }
-  const nowIsoUtc = new Date().toISOString();
-  const expiresAt = addDaysIso(nowIsoUtc, 1);
-  const connectionFlowStateId = createUlid();
-  const state = createUlid();
-  const provider = createChatGPTSubscriptionProvider();
-  const providerResponse = await provider.beginConnectionFlow({
-    connectionFlowStateId,
-    state,
-    expiresAt,
-  });
-  await auth.repository.createConnectionFlow({
-    connectionFlowStateId,
-    ownerDiscordUserId: auth.owner.ownerDiscordUserId,
-    stateHash: state,
-    requestedAt: nowIsoUtc,
-    expiresAt,
-    retainUntil: addDaysIso(nowIsoUtc, 30),
-  });
-  await recordOwnerSettingAudit(auth.repository, auth, {
-    settingCategory: "connection",
-    eventType: "connection.flow_started",
-    afterRef: connectionFlowStateId,
-    nowIsoUtc,
-  });
-  const body: BeginConnectionFlowResponse = {
-    connectionFlowStateId,
-    providerKind: providerResponse.providerKind,
-    authorizationUrl: providerResponse.authorizationUrl,
-    expiresAt,
-  };
-  return jsonResponse(body, { status: 201 });
-}
-
-async function handleCompleteConnectionFlow(
-  request: Request,
-  env: Env,
-): Promise<Response> {
-  const auth = await requireOwnerWithRepository(request, env);
-  if (auth instanceof Response) {
-    return auth;
-  }
-  let input;
-  try {
-    input = parseJson(
-      CompleteConnectionFlowRequestSchema,
-      await parseRequestJson(request),
-    );
-  } catch {
-    return problemResponse(400, "invalid_request", "Invalid request");
-  }
-  if (!env.CHATGPT_CREDENTIAL_MASTER_KEY_CURRENT) {
-    return problemResponse(
-      503,
-      "credential_encryption_unavailable",
-      "Credential encryption unavailable",
-    );
-  }
-
-  const connectionId = createUlid();
-  const provider = createChatGPTSubscriptionProvider();
-  const providerResponse = await provider.completeConnectionFlow({
-    connectionFlowStateId: input.connectionFlowStateId,
-    state: input.state,
-    opaqueCredentialCiphertext: input.opaqueCredentialCiphertext,
-  });
-  const encryptedCredentialCiphertext = await encryptCredentialEnvelope(
-    providerResponse.credentialCiphertext,
-    env,
-    {
-      ownerDiscordUserId: auth.owner.ownerDiscordUserId,
-      connectionFlowStateId: input.connectionFlowStateId,
-      connectionId,
-    },
-  );
-  if (!encryptedCredentialCiphertext) {
-    return problemResponse(
-      503,
-      "credential_encryption_unavailable",
-      "Credential encryption unavailable",
-    );
-  }
-
-  const nowIsoUtc = new Date().toISOString();
-  const connection = await auth.repository.completeConnectionFlow({
-    connectionFlowStateId: input.connectionFlowStateId,
-    ownerDiscordUserId: auth.owner.ownerDiscordUserId,
-    expectedStateHash: input.state,
-    connectionId,
-    encryptedCredentialCiphertext,
-    completedAt: nowIsoUtc,
-    retainUntil: addDaysIso(nowIsoUtc, 30),
-  });
-  if (!connection) {
-    return problemResponse(
-      409,
-      "invalid_connection_flow",
-      "Invalid connection flow",
-    );
-  }
-  await recordOwnerSettingAudit(auth.repository, auth, {
-    settingCategory: "connection",
-    eventType: "connection.connected",
-    afterRef: connection.connectionId,
-    nowIsoUtc,
-  });
-  return jsonResponse({
-    ownerDiscordUserId: auth.owner.ownerDiscordUserId,
-    connectionStatus: "connected",
-    connectionId: connection.connectionId,
-    updatedAt: connection.updatedAt ?? nowIsoUtc,
-  } satisfies ChatGPTSubscriptionConnectionStatusResponse);
-}
-
-async function handleRevokeConnection(
-  request: Request,
-  env: Env,
-): Promise<Response> {
-  const auth = await requireOwnerWithRepository(request, env);
-  if (auth instanceof Response) {
-    return auth;
-  }
-  const latestConnection = await auth.repository.getLatestConnectionForOwner(
-    auth.owner.ownerDiscordUserId,
-  );
-  if (latestConnection) {
-    await createChatGPTSubscriptionProvider().revokeConnection(
-      latestConnection.connectionId,
-    );
-  }
-  const nowIsoUtc = new Date().toISOString();
-  await auth.repository.revokeOwnerConnection(
-    auth.owner.ownerDiscordUserId,
-    nowIsoUtc,
-  );
-  await recordOwnerSettingAudit(auth.repository, auth, {
-    settingCategory: "connection",
-    eventType: "connection.revoked",
-    afterRef: latestConnection?.connectionId ?? null,
-    nowIsoUtc,
-  });
-  return jsonResponse({
-    ownerDiscordUserId: auth.owner.ownerDiscordUserId,
-    connectionStatus: "revoked",
-    connectionId: latestConnection?.connectionId ?? null,
-    updatedAt: nowIsoUtc,
-  } satisfies ChatGPTSubscriptionConnectionStatusResponse);
-}
-
-async function handleMarkNeedsReconnect(
-  request: Request,
-  env: Env,
-): Promise<Response> {
-  const auth = await requireOwnerWithRepository(request, env);
-  if (auth instanceof Response) {
-    return auth;
-  }
-  const nowIsoUtc = new Date().toISOString();
-  await auth.repository.markOwnerConnectionNeedsReconnect(
-    auth.owner.ownerDiscordUserId,
-    nowIsoUtc,
-  );
-  await recordOwnerSettingAudit(auth.repository, auth, {
-    settingCategory: "connection",
-    eventType: "connection.needs_reconnect",
-    nowIsoUtc,
-  });
-  return jsonResponse({
-    ownerDiscordUserId: auth.owner.ownerDiscordUserId,
-    connectionStatus: "needs_reconnect",
-    connectionId: null,
-    updatedAt: nowIsoUtc,
-  } satisfies ChatGPTSubscriptionConnectionStatusResponse);
-}
-
 async function handleListOwnerNotifications(
   request: Request,
   env: Env,
@@ -2027,45 +1670,6 @@ async function fetch(request: Request, env: Env): Promise<Response> {
     segments[3] === "automated-trigger-sources"
   ) {
     return handleUpdateAutomatedSource(request, env, segments[4] ?? "");
-  }
-
-  if (url.pathname === "/api/v1/owner/connection" && request.method === "GET") {
-    return handleGetConnection(request, env);
-  }
-
-  if (
-    url.pathname === "/api/v1/owner/connection/flow/begin" &&
-    request.method === "POST"
-  ) {
-    return handleBeginConnectionFlow(request, env);
-  }
-
-  if (
-    url.pathname === "/api/v1/owner/connection/flow/callback" &&
-    request.method === "POST"
-  ) {
-    return handleCompleteConnectionFlow(request, env);
-  }
-
-  if (
-    url.pathname === "/api/v1/owner/connection/revoke" &&
-    request.method === "POST"
-  ) {
-    return handleRevokeConnection(request, env);
-  }
-
-  if (
-    url.pathname === "/api/v1/owner/connection/reconnect" &&
-    request.method === "POST"
-  ) {
-    return handleBeginConnectionFlow(request, env);
-  }
-
-  if (
-    url.pathname === "/api/v1/owner/connection/needs-reconnect" &&
-    request.method === "POST"
-  ) {
-    return handleMarkNeedsReconnect(request, env);
   }
 
   if (

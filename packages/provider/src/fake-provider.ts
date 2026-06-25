@@ -1,56 +1,28 @@
+import { createUlid } from "@dc-chatbot/shared";
 import type {
-  BeginConnectionFlowRequest,
-  BeginConnectionFlowResponse,
-  ChatGPTSubscriptionProvider,
-  CompleteConnectionFlowRequest,
-  CompleteConnectionFlowResponse,
+  LLMProvider,
   ProviderGenerateRequest,
   ProviderGenerateResponse,
 } from "./types";
 
-const FAKE_PROVIDER_CALL_ID = "01HY0000000000000000000001";
+export type FakeLLMProviderOptions = {
+  providerCallIdFactory?: () => string;
+};
 
-export class FakeChatGPTSubscriptionProvider implements ChatGPTSubscriptionProvider {
-  async beginConnectionFlow(
-    request: BeginConnectionFlowRequest,
-  ): Promise<BeginConnectionFlowResponse> {
-    const authorizationUrl = new URL("https://provider.invalid/fake/connect");
-    authorizationUrl.searchParams.set("state", request.state);
-    authorizationUrl.searchParams.set(
-      "connection_flow_state_id",
-      request.connectionFlowStateId,
-    );
-    authorizationUrl.searchParams.set("expires_at", request.expiresAt);
-    return {
-      providerKind: "fake",
-      authorizationUrl: authorizationUrl.toString(),
-    };
-  }
+export class FakeLLMProvider implements LLMProvider {
+  private readonly providerCallIdFactory: () => string;
 
-  async completeConnectionFlow(
-    request: CompleteConnectionFlowRequest,
-  ): Promise<CompleteConnectionFlowResponse> {
-    return {
-      providerKind: "fake",
-      credentialCiphertext: request.opaqueCredentialCiphertext,
-    };
-  }
-
-  async revokeConnection(_connectionId: string): Promise<void> {
-    return;
+  constructor(options: FakeLLMProviderOptions = {}) {
+    this.providerCallIdFactory = options.providerCallIdFactory ?? createUlid;
   }
 
   async generateResponse(
     request: ProviderGenerateRequest,
   ): Promise<ProviderGenerateResponse> {
     return {
-      providerCallId: FAKE_PROVIDER_CALL_ID,
+      providerCallId: this.providerCallIdFactory(),
       model: request.model,
       replyText: `Fake provider response for ${request.triggerKind}.`,
     };
   }
-}
-
-export function createChatGPTSubscriptionProvider(): ChatGPTSubscriptionProvider {
-  return new FakeChatGPTSubscriptionProvider();
 }

@@ -30,15 +30,11 @@ export type RegisteredMemberStatus = v.InferOutput<
   typeof RegisteredMemberStatusSchema
 >;
 
-export const ConnectionLifecycleStatusSchema = v.picklist([
-  "connected",
-  "needs_reconnect",
-  "missing",
-  "revoked",
-]);
-export type ConnectionLifecycleStatus = v.InferOutput<
-  typeof ConnectionLifecycleStatusSchema
->;
+export const OwnerMeResponseSchema = v.object({
+  ownerDiscordUserId: DiscordSnowflakeSchema,
+  role: OwnerRoleSchema,
+});
+export type OwnerMeResponse = v.InferOutput<typeof OwnerMeResponseSchema>;
 
 export const HealthResponseSchema = v.object({
   status: v.literal("ok"),
@@ -54,13 +50,6 @@ export const ProblemDetailsSchema = v.object({
   requestId: v.optional(UlidSchema),
 });
 export type ProblemDetails = v.InferOutput<typeof ProblemDetailsSchema>;
-
-export const OwnerMeResponseSchema = v.object({
-  ownerDiscordUserId: DiscordSnowflakeSchema,
-  role: OwnerRoleSchema,
-  connectionStatus: v.picklist(["connected", "needs_reconnect", "missing"]),
-});
-export type OwnerMeResponse = v.InferOutput<typeof OwnerMeResponseSchema>;
 
 export const OwnerDashboardSummaryResponseSchema = v.object({
   owner: OwnerMeResponseSchema,
@@ -280,39 +269,6 @@ export type UpdateAutomatedTriggerSourceRequest = v.InferOutput<
   typeof UpdateAutomatedTriggerSourceRequestSchema
 >;
 
-export const ChatGPTSubscriptionConnectionStatusResponseSchema = v.object({
-  ownerDiscordUserId: DiscordSnowflakeSchema,
-  connectionStatus: ConnectionLifecycleStatusSchema,
-  connectionId: v.optional(v.union([UlidSchema, v.null()])),
-  updatedAt: v.optional(v.union([IsoDateTimeSchema, v.null()])),
-});
-export type ChatGPTSubscriptionConnectionStatusResponse = v.InferOutput<
-  typeof ChatGPTSubscriptionConnectionStatusResponseSchema
->;
-
-export const BeginConnectionFlowResponseSchema = v.object({
-  connectionFlowStateId: UlidSchema,
-  providerKind: v.literal("fake"),
-  authorizationUrl: v.string(),
-  expiresAt: IsoDateTimeSchema,
-});
-export type BeginConnectionFlowResponse = v.InferOutput<
-  typeof BeginConnectionFlowResponseSchema
->;
-
-export const CompleteConnectionFlowRequestSchema = v.object({
-  connectionFlowStateId: UlidSchema,
-  state: NonEmptySafeStringSchema,
-  opaqueCredentialCiphertext: v.pipe(
-    v.string(),
-    v.minLength(1),
-    v.maxLength(4096),
-  ),
-});
-export type CompleteConnectionFlowRequest = v.InferOutput<
-  typeof CompleteConnectionFlowRequestSchema
->;
-
 export const OwnerNotificationStatusSchema = v.picklist([
   "pending_delivery",
   "delivery_requested",
@@ -444,7 +400,6 @@ export const BotMessageIntakeResponseSchema = v.object({
     "non_allowed_user",
     "automated_source_ignored",
     "automated_source_cooldown",
-    "connection_unavailable",
   ]),
   contextMessageLimit: v.optional(
     v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(50)),
@@ -481,7 +436,6 @@ export const BotRespondRequestSchema = v.object({
   triggerAuthorDiscordUserId: DiscordSnowflakeSchema,
   triggerAuthorApplicationId: v.optional(DiscordSnowflakeSchema),
   triggerKind: TriggerKindSchema,
-  effectiveConnectionId: v.optional(UlidSchema),
   model: v.pipe(v.string(), v.minLength(1), v.maxLength(80)),
   conversationContextMessageIds: v.array(DiscordSnowflakeSchema),
   conversationContextMessages: v.optional(

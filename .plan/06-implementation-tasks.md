@@ -579,7 +579,7 @@
   - `apps/bot` build config
   - optional Dockerfile if selected deploy target requires container
 - Tasks:
-  - Node.js 22 runtime
+  - Node.js 24 runtime
   - production start command
 - Verify:
   - `pnpm --filter @dc-chatbot/bot build`

@@ -1,6 +1,5 @@
 export type OwnerRole = "admin_owner" | "regular_owner";
 export type RegisteredMemberStatus = "active" | "disabled";
-export type ConnectionStatus = "active" | "needs_reconnect" | "revoked";
 export type OwnerNotificationStatus =
   | "pending_delivery"
   | "delivery_requested"
@@ -30,11 +29,16 @@ export type AllowedDiscordUserRecord =
       assignedOwnerDiscordUserId: string;
     };
 
-export type ChatGPTSubscriptionConnectionRecord = {
-  connectionId: string;
-  ownerDiscordUserId: string;
-  status: ConnectionStatus;
-  updatedAt?: string | null;
+export type InsertProviderCallAuditInput = {
+  providerCallId: string;
+  requestId: string;
+  providerRef: string;
+  model: string;
+  status: "started" | "completed" | "failed";
+  safeErrorCategory: string | null;
+  durationMs: number | null;
+  createdAt: string;
+  retainUntil: string;
 };
 
 export type UpsertDiscordUserInput = {
@@ -58,18 +62,6 @@ export type InsertRequestAuditInput = {
   eventType: string;
   status: "accepted" | "rejected" | "failed" | "completed";
   errorCategory: string | null;
-  durationMs: number | null;
-  createdAt: string;
-  retainUntil: string;
-};
-
-export type InsertProviderCallAuditInput = {
-  providerCallId: string;
-  requestId: string;
-  connectionId: string;
-  model: string;
-  status: "started" | "completed" | "failed";
-  safeErrorCategory: string | null;
   durationMs: number | null;
   createdAt: string;
   retainUntil: string;
@@ -164,25 +156,6 @@ export type OwnerNotificationRecord = {
   updatedAt: string;
 };
 
-export type CreateConnectionFlowInput = {
-  connectionFlowStateId: string;
-  ownerDiscordUserId: string;
-  stateHash: string;
-  requestedAt: string;
-  expiresAt: string;
-  retainUntil: string;
-};
-
-export type CompleteConnectionFlowInput = {
-  connectionFlowStateId: string;
-  ownerDiscordUserId: string;
-  expectedStateHash: string;
-  connectionId: string;
-  encryptedCredentialCiphertext: string;
-  completedAt: string;
-  retainUntil: string;
-};
-
 export type InsertCleanupRunMetadataInput = {
   cleanupRunId: string;
   status: "started" | "completed" | "failed";
@@ -215,13 +188,6 @@ type CandidateRow = {
   first_observed_at: string;
   last_observed_at: string;
   expires_at: string;
-};
-
-type ConnectionRow = {
-  connection_id: string;
-  owner_discord_user_id: string;
-  status: ConnectionStatus;
-  updated_at: string | null;
 };
 
 type CountRow = { count: number };
@@ -385,51 +351,6 @@ export class D1DcChatbotRepository {
       : null;
   }
 
-  async getOwnerConnectionStatus(
-    ownerDiscordUserId: string,
-  ): Promise<"connected" | "needs_reconnect" | "missing"> {
-    const row = await this.db
-      .prepare(
-        `SELECT status
-         FROM chatgpt_subscription_connections
-         WHERE owner_discord_user_id = ?
-         ORDER BY updated_at DESC
-         LIMIT 1`,
-      )
-      .bind(ownerDiscordUserId)
-      .first<{ status: ConnectionStatus }>();
-
-    if (!row || row.status === "revoked") {
-      return "missing";
-    }
-
-    return row.status === "active" ? "connected" : "needs_reconnect";
-  }
-
-  async getLatestConnectionForOwner(
-    ownerDiscordUserId: string,
-  ): Promise<ChatGPTSubscriptionConnectionRecord | null> {
-    const row = await this.db
-      .prepare(
-        `SELECT connection_id, owner_discord_user_id, status, updated_at
-         FROM chatgpt_subscription_connections
-         WHERE owner_discord_user_id = ?
-         ORDER BY updated_at DESC
-         LIMIT 1`,
-      )
-      .bind(ownerDiscordUserId)
-      .first<ConnectionRow>();
-
-    return row
-      ? {
-          connectionId: row.connection_id,
-          ownerDiscordUserId: row.owner_discord_user_id,
-          status: row.status,
-          updatedAt: row.updated_at,
-        }
-      : null;
-  }
-
   async findAllowedDiscordUser(
     discordUserId: string,
   ): Promise<AllowedDiscordUserRecord | null> {
@@ -471,32 +392,6 @@ export class D1DcChatbotRepository {
       kind: "registered_member",
       discordUserId: member.member_discord_user_id,
       assignedOwnerDiscordUserId: member.assigned_owner_discord_user_id,
-    };
-  }
-
-  async findActiveConnectionForOwner(
-    ownerDiscordUserId: string,
-  ): Promise<ChatGPTSubscriptionConnectionRecord | null> {
-    const row = await this.db
-      .prepare(
-        `SELECT connection_id, owner_discord_user_id, status, updated_at
-         FROM chatgpt_subscription_connections
-         WHERE owner_discord_user_id = ? AND status = 'active'
-         ORDER BY updated_at DESC
-         LIMIT 1`,
-      )
-      .bind(ownerDiscordUserId)
-      .first<ConnectionRow>();
-
-    if (!row) {
-      return null;
-    }
-
-    return {
-      connectionId: row.connection_id,
-      ownerDiscordUserId: row.owner_discord_user_id,
-      status: row.status,
-      updatedAt: row.updated_at,
     };
   }
 
@@ -587,7 +482,7 @@ export class D1DcChatbotRepository {
         `INSERT INTO provider_call_audit_metadata (
            provider_call_id,
            request_id,
-           connection_id,
+           provider_ref,
            model,
            status,
            safe_error_category,
@@ -599,7 +494,7 @@ export class D1DcChatbotRepository {
       .bind(
         input.providerCallId,
         input.requestId,
-        input.connectionId,
+        input.providerRef,
         input.model,
         input.status,
         input.safeErrorCategory,
@@ -1427,127 +1322,6 @@ export class D1DcChatbotRepository {
         input.updatedAt,
         input.ownerNotificationId,
       )
-      .run();
-    return (result.meta.changes ?? 0) > 0;
-  }
-
-  async createConnectionFlow(input: CreateConnectionFlowInput): Promise<void> {
-    await this.db
-      .prepare(
-        `INSERT INTO connection_flow_states (
-           connection_flow_state_id,
-           owner_discord_user_id,
-           provider_kind,
-           state_hash,
-           status,
-           requested_at,
-           expires_at,
-           completed_at,
-           retain_until
-         ) VALUES (?, ?, 'fake', ?, 'pending', ?, ?, NULL, ?)`,
-      )
-      .bind(
-        input.connectionFlowStateId,
-        input.ownerDiscordUserId,
-        input.stateHash,
-        input.requestedAt,
-        input.expiresAt,
-        input.retainUntil,
-      )
-      .run();
-  }
-
-  async completeConnectionFlow(
-    input: CompleteConnectionFlowInput,
-  ): Promise<ChatGPTSubscriptionConnectionRecord | null> {
-    const flow = await this.db
-      .prepare(
-        `SELECT connection_flow_state_id
-         FROM connection_flow_states
-         WHERE connection_flow_state_id = ?
-           AND owner_discord_user_id = ?
-           AND state_hash = ?
-           AND status = 'pending'
-           AND expires_at >= ?
-         LIMIT 1`,
-      )
-      .bind(
-        input.connectionFlowStateId,
-        input.ownerDiscordUserId,
-        input.expectedStateHash,
-        input.completedAt,
-      )
-      .first<{ connection_flow_state_id: string }>();
-    if (!flow) {
-      return null;
-    }
-
-    await this.db
-      .prepare(
-        `UPDATE chatgpt_subscription_connections
-         SET status = 'revoked', updated_at = ?
-         WHERE owner_discord_user_id = ? AND status IN ('active', 'needs_reconnect')`,
-      )
-      .bind(input.completedAt, input.ownerDiscordUserId)
-      .run();
-    await this.db
-      .prepare(
-        `INSERT INTO chatgpt_subscription_connections (
-           connection_id,
-           owner_discord_user_id,
-           status,
-           encrypted_credential_ciphertext,
-           credential_version,
-           created_at,
-           updated_at
-         ) VALUES (?, ?, 'active', ?, 1, ?, ?)`,
-      )
-      .bind(
-        input.connectionId,
-        input.ownerDiscordUserId,
-        input.encryptedCredentialCiphertext,
-        input.completedAt,
-        input.completedAt,
-      )
-      .run();
-    await this.db
-      .prepare(
-        `UPDATE connection_flow_states
-         SET status = 'completed', completed_at = ?, retain_until = ?
-         WHERE connection_flow_state_id = ?`,
-      )
-      .bind(input.completedAt, input.retainUntil, input.connectionFlowStateId)
-      .run();
-
-    return this.getLatestConnectionForOwner(input.ownerDiscordUserId);
-  }
-
-  async revokeOwnerConnection(
-    ownerDiscordUserId: string,
-    nowIsoUtc: string,
-  ): Promise<boolean> {
-    const result = await this.db
-      .prepare(
-        `UPDATE chatgpt_subscription_connections
-         SET status = 'revoked', updated_at = ?
-         WHERE owner_discord_user_id = ? AND status IN ('active', 'needs_reconnect')`,
-      )
-      .bind(nowIsoUtc, ownerDiscordUserId)
-      .run();
-    return (result.meta.changes ?? 0) > 0;
-  }
-
-  async markOwnerConnectionNeedsReconnect(
-    ownerDiscordUserId: string,
-    nowIsoUtc: string,
-  ): Promise<boolean> {
-    const result = await this.db
-      .prepare(
-        `UPDATE chatgpt_subscription_connections
-         SET status = 'needs_reconnect', updated_at = ?
-         WHERE owner_discord_user_id = ? AND status = 'active'`,
-      )
-      .bind(nowIsoUtc, ownerDiscordUserId)
       .run();
     return (result.meta.changes ?? 0) > 0;
   }

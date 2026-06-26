@@ -72,10 +72,12 @@ If `BOT_DEPLOY_TARGET` is unset, API/Web/D1 deploy still runs and the Bot deploy
 5. Configure the API Worker route/custom domain and the Web Pages custom domain.
 6. Configure Cloudflare Access:
    - Owner human access protects the Web app and `/api/v1/owner/*` routes.
+   - Owner Access CORS settings allow preflight for Web UI writes, preferably by enabling **Bypass options requests to origin**.
    - Bot service access protects `/api/v1/bot/*` routes with a Cloudflare Access Service Token.
+   - Record both Owner `CF_ACCESS_AUD` and Bot `CF_BOT_ACCESS_AUD` audience tags.
 7. Add the required GitHub Secrets and Variables from `docs/deploy/secrets.md`.
 8. Run the deploy workflow manually.
-9. Verify smoke checks and Cloudflare logs contain metadata only.
+9. Verify smoke checks, Owner API preflight, Bot API service-token probe, and metadata-only logs.
 
 ## VPS Bot setup checklist
 
@@ -93,8 +95,10 @@ If `BOT_DEPLOY_TARGET` is unset, API/Web/D1 deploy still runs and the Bot deploy
 6. Configure Docker Compose deploy commands. Recommended values:
    - `BOT_VPS_START_COMMAND=docker compose -f apps/bot/deploy/compose.production.yml up -d --build bot`
    - `BOT_VPS_HEALTH_COMMAND=docker compose -f apps/bot/deploy/compose.production.yml ps --status running bot`
-7. Configure SSH deploy secrets and variables from `docs/deploy/secrets.md`.
-8. Set `BOT_DEPLOY_TARGET=vps` to enable the GitHub Actions VPS job.
+7. Configure Cloudflare Tunnel SSH deploy secrets and variables from `docs/deploy/secrets.md`.
+8. Pin `BOT_VPS_KNOWN_HOSTS` to the actual Tunnel hostname and VPS SSH host key.
+9. Set `BOT_DEPLOY_TARGET=vps` to enable the GitHub Actions VPS job.
+10. After Tunnel deployment works, close direct public SSH ingress.
 
 Detailed VPS setup is in `apps/bot/deploy/README.md` and `docs/deploy/github-actions-cloudflare-vps.md`.
 
@@ -127,6 +131,16 @@ Production deployments must keep `ALLOW_LOCAL_AUTH_BYPASS=false` or unset. The d
 
 Do not create a production Worker variable or secret that enables local auth bypass.
 
+## Production initial data
+
+After the first successful D1 migration and deploy, production needs safe operational metadata before normal Bot replies can succeed:
+
+- one real Admin Owner row in `owner_discord_users`
+- no placeholder Owner rows
+- model settings saved through the Owner UI at `/settings`
+
+Use metadata-only D1 inspection when troubleshooting. Do not paste Discord message content, prompt body, response text, provider raw bodies, or credential material.
+
 ## Bot deployment status
 
 The Bot Worker deployment target is the configured dedicated VPS. The deploy workflow does not copy production Discord credentials to the VPS; those secrets must already be present in the VPS-local service environment or secret store.
@@ -137,6 +151,7 @@ The Bot Worker keeps the existing boundaries:
 - It does not receive the NVIDIA NIM API key / bearer token.
 - It does not call the provider backend directly.
 - It calls `/api/v1/bot/*` through Cloudflare Access Service Token headers.
+- The API Worker verifies the Cloudflare Access JWT from `Cf-Access-Jwt-Assertion` for Bot routes; `CF_BOT_ACCESS_AUD` must match the Bot Access application audience tag.
 
 ## Safety rules
 

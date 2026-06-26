@@ -66,16 +66,22 @@ Configure two Access boundaries:
 
 1. Owner human access
    - Protects the Web app and `/api/v1/owner/*` routes.
+   - Recommended production domains:
+     - `chatbot.waku.dev`
+     - `api.chatbot.waku.dev/api/v1/owner/*`
    - Record `CF_ACCESS_TEAM_DOMAIN`.
    - Record `CF_ACCESS_AUD` for the Owner Access application.
+   - For cross-origin Owner API writes from the Web UI, configure **Advanced settings** -> **Cross-Origin Resource Sharing (CORS) settings** -> **Bypass options requests to origin**. Browsers do not send Access cookies on preflight `OPTIONS`, so Access otherwise blocks `PUT`/`PATCH`/non-simple requests before they reach the API Worker.
 2. Bot service access
    - Protects `/api/v1/bot/*` routes.
+   - Recommended production domain: `api.chatbot.waku.dev/api/v1/bot/*`.
+   - Record `CF_BOT_ACCESS_AUD` for the Bot Access application.
    - Create a Cloudflare Access Service Token.
    - Store the service token client ID and client secret as both:
      - API Worker secrets through GitHub Actions deployment.
      - VPS-local Bot runtime secrets.
 
-The API validates Owner routes with the Access JWT and Bot routes with the service token identity.
+The API validates Owner routes with the Owner Access JWT and Bot routes with the Bot Access JWT supplied by Cloudflare Access in `Cf-Access-Jwt-Assertion`. Do not rely on raw service token headers reaching the Worker origin.
 
 ### 2.3 Prepare Cloudflare API token
 
@@ -177,15 +183,16 @@ The Dockerfile runs `pnpm --filter @dc-chatbot/bot build` during image build, so
 ### 3.6 Cloudflare Tunnel SSH for GitHub Actions
 
 1. Create a Cloudflare Tunnel for the VPS, for example `dc-chatbot-vps-ssh`.
-2. Publish `ssh.chatbot.waku.dev` to the VPS SSH service, usually `ssh://localhost:22`.
-3. Protect `ssh.chatbot.waku.dev` with a Cloudflare Access application.
+2. Publish a hostname such as `chatbot-ssh.waku.dev` to the VPS SSH service, usually `ssh://localhost:22`.
+3. Protect that hostname with a Cloudflare Access application.
 4. Create a dedicated Cloudflare Access Service Token for GitHub Actions SSH deploy.
 5. Create a deploy-only SSH key pair for GitHub Actions.
 6. Add the SSH public key to the VPS deploy user's `authorized_keys`.
-7. Capture the VPS SSH host key and pin it to the Tunnel hostname in `BOT_VPS_KNOWN_HOSTS`, for example `ssh.chatbot.waku.dev ssh-ed25519 ...`.
+7. Capture the VPS SSH host key and pin it to the Tunnel hostname in `BOT_VPS_KNOWN_HOSTS`, for example `chatbot-ssh.waku.dev ssh-ed25519 ...`.
 8. Store the SSH private key, pinned known_hosts entry, and Cloudflare Access Service Token in GitHub Actions Secrets.
+9. After Tunnel-based deploy succeeds, close direct public SSH ingress at the VPS firewall/security-group layer.
 
-Do not use `ssh-keyscan` against the public Tunnel hostname as the trust source for production. Prefer reading the VPS host key from the server itself and pinning that key to `ssh.chatbot.waku.dev`.
+Do not use `ssh-keyscan` against the public Tunnel hostname as the trust source for production. Prefer reading the VPS host key from the server itself and pinning that key to the actual Tunnel hostname. If TLS handshake fails for a deep SSH hostname, use a hostname covered by the zone certificate, for example `chatbot-ssh.waku.dev` instead of `ssh.chatbot.waku.dev`.
 
 ## 4. GitHub Actions configuration
 
@@ -207,6 +214,7 @@ Configure repository-level Actions Secrets and Variables.
 | ------------------------------- | ----------------------------------------------------------------------- |
 | `CF_ACCESS_TEAM_DOMAIN`         | Cloudflare Access team domain, for example `team.cloudflareaccess.com`. |
 | `CF_ACCESS_AUD`                 | Cloudflare Access application audience tag for Owner routes.            |
+| `CF_BOT_ACCESS_AUD`             | Cloudflare Access application audience tag for Bot service routes.      |
 | `CLOUDFLARE_D1_DATABASE_NAME`   | Production D1 database name.                                            |
 | `CLOUDFLARE_D1_DATABASE_ID`     | Production D1 database ID.                                              |
 | `CLOUDFLARE_PAGES_PROJECT_NAME` | Cloudflare Pages project name for `apps/web`.                           |
@@ -262,9 +270,10 @@ Optional VPS variables:
 1. Confirm all required GitHub Actions Secrets and Variables are configured.
 2. Confirm the VPS Docker Compose Bot service can start manually.
 3. Confirm the VPS has production Bot runtime secrets locally.
-4. Confirm `apps/api/wrangler.toml` does not enable `ALLOW_LOCAL_AUTH_BYPASS=true`.
-5. Confirm D1 migrations are forward-only.
-6. Run local or CI checks before merging to the deployment branch:
+4. Confirm the Owner Access application has CORS preflight handling for `/api/v1/owner/*` writes, preferably **Bypass options requests to origin**.
+5. Confirm `apps/api/wrangler.toml` does not enable `ALLOW_LOCAL_AUTH_BYPASS=true`.
+6. Confirm D1 migrations are forward-only.
+7. Run local or CI checks before merging to the deployment branch:
 
    ```bash
    pnpm install --frozen-lockfile
@@ -303,7 +312,18 @@ Cloudflare:
 3. Confirm API Worker secrets were uploaded by name only; values must not appear in logs.
 4. Confirm Web Pages deploy succeeded.
 5. Confirm optional API/Web smoke checks passed.
-6. Confirm Cloudflare logs are metadata-only.
+6. Confirm Owner API preflight succeeds:
+
+   ```bash
+   curl -i -X OPTIONS "https://api.chatbot.waku.dev/api/v1/owner/settings/models" \
+     -H "Origin: https://chatbot.waku.dev" \
+     -H "Access-Control-Request-Method: PUT" \
+     -H "Access-Control-Request-Headers: content-type"
+   ```
+
+   Expected response metadata includes `204` and `Access-Control-Allow-Origin: https://chatbot.waku.dev`.
+
+7. Confirm Cloudflare logs are metadata-only.
 
 VPS:
 
@@ -316,6 +336,25 @@ VPS:
    ```bash
    docker compose -f apps/bot/deploy/compose.production.yml ps bot
    docker compose -f apps/bot/deploy/compose.production.yml logs --since 10m bot
+   ```
+
+6. Probe Bot API authentication from the VPS. The empty `{}` body should fail validation with `400`; `401` means Worker-side Bot Access JWT verification is still failing, and `403` means Cloudflare Access blocked the request before Worker handling.
+
+   ```bash
+   sudo sh -c '
+   set -a
+   . /etc/dc-chatbot/bot.env
+   set +a
+
+   curl -sS -o /tmp/dc-chatbot-intake-probe.txt -w "%{http_code}\n" \
+     -X POST "$DC_CHATBOT_API_BASE_URL/api/v1/bot/messages/intake" \
+     -H "content-type: application/json" \
+     -H "cf-access-client-id: $CF_ACCESS_CLIENT_ID" \
+     -H "cf-access-client-secret: $CF_ACCESS_CLIENT_SECRET" \
+     --data "{}"
+
+   cat /tmp/dc-chatbot-intake-probe.txt
+   '
    ```
 
 Do not paste Discord message content, prompt body, response text, credential material, attachment URLs, or provider raw bodies into troubleshooting channels.
@@ -368,9 +407,11 @@ Check:
 
 Check the failed step:
 
-- SSH connection or host key failure
+- SSH connection, Tunnel, or host key failure
   - Verify `BOT_VPS_HOST`, `BOT_VPS_USER`, `BOT_VPS_PORT`, `BOT_VPS_SSH_PRIVATE_KEY`, `BOT_VPS_KNOWN_HOSTS`, `CF_TUNNEL_SSH_CLIENT_ID`, and `CF_TUNNEL_SSH_CLIENT_SECRET`.
-  - Confirm the Cloudflare Tunnel is healthy and `ssh.chatbot.waku.dev` routes to `ssh://localhost:22`.
+  - Confirm the Cloudflare Tunnel is healthy and the configured hostname, for example `chatbot-ssh.waku.dev`, routes to `ssh://localhost:22`.
+  - If GitHub Actions reports `No ED25519 host key is known`, update `BOT_VPS_KNOWN_HOSTS` with the VPS host key pinned to the Tunnel hostname.
+  - If the browser or `curl -Iv https://<ssh-hostname>` reports TLS handshake failure, verify the hostname is covered by the Cloudflare certificate and consider using a single-label subdomain such as `chatbot-ssh.waku.dev`.
 - `git pull --ff-only` failure
   - Remove local uncommitted changes from the VPS checkout or recreate the checkout.
 - Docker image build failure
@@ -380,7 +421,59 @@ Check the failed step:
 - health command failure
   - Inspect container status and metadata-only logs on the VPS.
 
-### 6.6 Urgent recovery
+### 6.6 Runtime/API verification failures
+
+- Owner UI CORS error on `PUT /api/v1/owner/settings/models`
+  - Verify the Owner Access application includes `api.chatbot.waku.dev/api/v1/owner/*`.
+  - Enable Access CORS **Bypass options requests to origin** or configure Access-managed preflight responses matching the API Worker CORS headers.
+  - Re-run the `OPTIONS` preflight curl from the post-deploy verification section.
+- Bot says `現在 Bot API に接続できません。時間をおいてもう一度お試しください。`
+  - Run the Bot API intake probe from the VPS.
+  - `400` means Bot Access auth passed and the empty body was rejected as expected.
+  - `401` means the API Worker rejected the Bot Access JWT. Verify `CF_BOT_ACCESS_AUD` matches the Bot Access application audience tag and redeploy the API Worker.
+  - `403` means Cloudflare Access blocked the request. Verify the Bot Access application domain, Service Auth policy, and Bot service token.
+- Bot says `現在回答を生成できません。時間をおいてもう一度お試しください。`
+  - Verify Owner UI model settings are saved in production.
+  - Inspect metadata-only D1 audits:
+
+    ```bash
+    pnpm dlx wrangler@4 d1 execute dc-chatbot-production \
+      --remote \
+      --command "SELECT provider_call_stage, status, safe_error_category, model, provider_kind, provider_ref, created_at FROM provider_call_audit_metadata ORDER BY created_at DESC LIMIT 10;"
+
+    pnpm dlx wrangler@4 d1 execute dc-chatbot-production \
+      --remote \
+      --command "SELECT event_type, status, error_category, created_at FROM request_audit_metadata ORDER BY created_at DESC LIMIT 10;"
+    ```
+
+  - `not_configured` usually means the NVIDIA NIM bearer token or model settings are missing.
+  - `authentication_failed` usually means the NVIDIA NIM API key is invalid, expired, revoked, or in the wrong format.
+  - `rate_limited` or `temporary_unavailable` points to provider-side throttling or availability.
+  - Do not print provider raw request/response bodies, prompt body, Conversation Context content, or response text.
+
+### 6.7 Production initial data
+
+After the first successful deploy and D1 migration, initialize production operational data through the Owner UI or carefully reviewed metadata-only SQL.
+
+Minimum required checks:
+
+```bash
+pnpm dlx wrangler@4 d1 execute dc-chatbot-production \
+  --remote \
+  --command "SELECT owner_discord_user_id, role, cloudflare_access_subject FROM owner_discord_users;"
+
+pnpm dlx wrangler@4 d1 execute dc-chatbot-production \
+  --remote \
+  --command "SELECT * FROM model_settings;"
+
+pnpm dlx wrangler@4 d1 execute dc-chatbot-production \
+  --remote \
+  --command "SELECT * FROM provider_settings;"
+```
+
+The first Admin Owner row must use the real Owner Discord User ID and Cloudflare Access subject. Delete any placeholder rows before production use. Model settings must be saved before generated Bot replies can succeed with the NVIDIA NIM provider.
+
+### 6.8 Urgent recovery
 
 Preferred recovery is a forward-fix commit and redeploy.
 

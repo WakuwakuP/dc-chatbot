@@ -12,11 +12,13 @@ The Web frontend and API Worker are deployed to Cloudflare. The Bot Worker needs
 
 ## Decision
 
-Deploy `apps/bot` to a dedicated VPS through GitHub Actions over SSH and run it with Docker Compose.
+Deploy `apps/bot` to a dedicated VPS through GitHub Actions over Cloudflare Tunnel SSH and run it with Docker Compose.
+
+Direct public SSH ingress should remain closed after Tunnel deployment is verified. The Cloudflare Tunnel hostname is protected by a dedicated Cloudflare Access application and Service Token for GitHub Actions SSH deploy.
 
 The GitHub Actions deploy workflow performs the Bot deployment only when `BOT_DEPLOY_TARGET=vps` is configured. The VPS deployment job:
 
-1. SSHes into the configured VPS using a repository secret private key and pinned `known_hosts` entry.
+1. SSHes into the configured VPS through `cloudflared access ssh`, using a repository secret private key and pinned `known_hosts` entry.
 2. Changes into the configured repository directory.
 3. Runs `git fetch --prune origin`.
 4. Checks out the configured branch, or the workflow branch when `BOT_VPS_BRANCH` is unset.
@@ -41,6 +43,7 @@ BOT_VPS_HEALTH_COMMAND=docker compose -f apps/bot/deploy/compose.production.yml 
 - The Bot Worker must not receive `NVIDIA_NIM_BEARER_TOKEN`; provider credential material stays in the API Worker runtime.
 - The Bot Worker must not access D1 directly and must not call the NVIDIA NIM provider backend directly.
 - The Bot Worker calls `/api/v1/bot/*` through Cloudflare Access Service Token headers.
+- The API Worker verifies the origin-facing Cloudflare Access JWT for Bot routes using the Bot Access application audience tag (`CF_BOT_ACCESS_AUD`). Raw service token headers should not be treated as the origin authentication source.
 
 ## Process supervision
 

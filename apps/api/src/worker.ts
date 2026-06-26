@@ -55,6 +55,7 @@ export type Env = {
   CF_ACCESS_AUD?: string;
   CF_ACCESS_CLIENT_ID?: string;
   CF_ACCESS_CLIENT_SECRET?: string;
+  OWNER_WEB_ORIGIN?: string;
   LLM_PROVIDER?: "fake" | "nvidia_nim";
   NVIDIA_NIM_BEARER_TOKEN?: string;
   NVIDIA_NIM_BASE_URL?: string;
@@ -63,6 +64,12 @@ export type Env = {
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
 } as const;
+
+const DEFAULT_OWNER_WEB_ORIGIN = "https://chatbot.waku.dev";
+const LOCAL_OWNER_WEB_ORIGINS = new Set([
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+]);
 
 function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(body), {
@@ -2088,7 +2095,72 @@ function pathSegments(pathname: string): string[] {
   return pathname.split("/").filter(Boolean).map(decodeURIComponent);
 }
 
-async function fetch(request: Request, env: Env): Promise<Response> {
+function isOwnerApiPath(pathname: string): boolean {
+  return pathname === "/api/v1/owner" || pathname.startsWith("/api/v1/owner/");
+}
+
+function allowedOwnerWebOrigin(request: Request, env: Env): string | null {
+  const origin = request.headers.get("origin");
+  if (!origin) {
+    return null;
+  }
+
+  const configuredOrigin =
+    env.OWNER_WEB_ORIGIN?.trim() || DEFAULT_OWNER_WEB_ORIGIN;
+  if (origin === configuredOrigin || LOCAL_OWNER_WEB_ORIGINS.has(origin)) {
+    return origin;
+  }
+
+  return null;
+}
+
+function ownerCorsHeaders(origin: string): HeadersInit {
+  return {
+    "access-control-allow-credentials": "true",
+    "access-control-allow-headers": [
+      "content-type",
+      "x-dev-auth-secret",
+      "x-dev-access-subject",
+      "x-dev-owner-discord-user-id",
+      "x-dev-owner-role",
+    ].join(", "),
+    "access-control-allow-methods": "GET, POST, PUT, PATCH, OPTIONS",
+    "access-control-allow-origin": origin,
+    "access-control-max-age": "86400",
+    vary: "Origin",
+  };
+}
+
+function withOwnerCors(
+  request: Request,
+  env: Env,
+  response: Response,
+): Response {
+  const origin = allowedOwnerWebOrigin(request, env);
+  if (!origin) {
+    return response;
+  }
+
+  const headers = new Headers(response.headers);
+  for (const [key, value] of Object.entries(ownerCorsHeaders(origin))) {
+    headers.set(key, value);
+  }
+  return new Response(response.body, {
+    headers,
+    status: response.status,
+    statusText: response.statusText,
+  });
+}
+
+function ownerCorsPreflight(request: Request, env: Env): Response {
+  const origin = allowedOwnerWebOrigin(request, env);
+  if (!origin) {
+    return new Response(null, { status: 403 });
+  }
+  return new Response(null, { status: 204, headers: ownerCorsHeaders(origin) });
+}
+
+async function routeRequest(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const segments = pathSegments(url.pathname);
 
@@ -2229,6 +2301,18 @@ async function fetch(request: Request, env: Env): Promise<Response> {
   }
 
   return problemResponse(404, "not_found", "Not found");
+}
+
+async function fetch(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  if (isOwnerApiPath(url.pathname)) {
+    if (request.method === "OPTIONS") {
+      return ownerCorsPreflight(request, env);
+    }
+    return withOwnerCors(request, env, await routeRequest(request, env));
+  }
+
+  return routeRequest(request, env);
 }
 
 export default {

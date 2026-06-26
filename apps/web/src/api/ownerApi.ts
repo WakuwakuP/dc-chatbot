@@ -219,7 +219,10 @@ async function requestJson<T>(
   options: RequestJsonOptions,
   map: (raw: unknown) => T,
 ): Promise<T> {
-  const init: RequestInit = { method: options.method ?? "GET" };
+  const init: RequestInit = {
+    credentials: "include",
+    method: options.method ?? "GET",
+  };
   const headers = buildOwnerRequestHeaders();
   if (options.body) {
     headers["content-type"] = "application/json";

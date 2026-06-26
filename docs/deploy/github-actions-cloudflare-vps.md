@@ -5,7 +5,7 @@ This runbook describes the production deployment automation for `dc-chatbot`.
 - `apps/api` -> Cloudflare Workers
 - `apps/web` -> Cloudflare Pages
 - D1 migrations -> Cloudflare D1 through Wrangler
-- `apps/bot` -> Docker Compose on a dedicated VPS by SSH, `git pull`, then `docker compose up -d --build`
+- `apps/bot` -> Docker Compose on a dedicated VPS through Cloudflare Tunnel SSH, `git pull`, then `docker compose up -d --build`
 
 `apps/api-spike` is a compatibility/reference spike and is not part of production deployment.
 
@@ -33,7 +33,7 @@ flowchart TD
     d1 --> api[Deploy API Worker]
     api --> web[Deploy Web Pages]
     web --> bot{BOT_DEPLOY_TARGET}
-    bot -->|vps| ssh[SSH to VPS]
+    bot -->|vps| ssh[cloudflared SSH to VPS]
     ssh --> pull[git pull --ff-only]
     pull --> start[Run Docker Compose start command]
     start --> botHealth[Optional Docker Compose health command]
@@ -95,9 +95,10 @@ Store the token only as the GitHub Actions secret `CLOUDFLARE_API_TOKEN`.
 On the VPS, install:
 
 - Git
-- OpenSSH server
+- OpenSSH server bound for local/Tunnel access
 - Docker Engine
 - Docker Compose plugin
+- `cloudflared` connector running as a service
 
 The VPS host does not need Node.js or pnpm installed directly for the Bot runtime; the Bot image is built from `apps/bot/deploy/Dockerfile`.
 
@@ -112,7 +113,7 @@ Recommended layout:
 /etc/dc-chatbot/bot.env # root-readable or service-user-readable runtime env file
 ```
 
-The deploy user needs write access to the repository checkout and permission to run the required Docker Compose commands. Docker group membership is effectively host-level privilege, so keep this user dedicated to deployment and restrict SSH access.
+The deploy user needs write access to the repository checkout and permission to run the required Docker Compose commands. Docker group membership is effectively host-level privilege, so keep this user dedicated to deployment. Public SSH ingress should be closed once Cloudflare Tunnel deploy works.
 
 ### 3.3 Clone the repository once
 
@@ -173,15 +174,18 @@ BOT_VPS_HEALTH_COMMAND=docker compose -f apps/bot/deploy/compose.production.yml 
 
 The Dockerfile runs `pnpm --filter @dc-chatbot/bot build` during image build, so Bot TypeScript/package issues fail deployment before the new container is started.
 
-### 3.6 SSH key for GitHub Actions
+### 3.6 Cloudflare Tunnel SSH for GitHub Actions
 
-1. Create a deploy-only SSH key pair for GitHub Actions.
-2. Add the public key to the VPS deploy user's `authorized_keys`.
-3. Restrict the key to the deploy user and, if possible, restrict network/source access.
-4. Capture the VPS host key in known_hosts format from a trusted channel.
-5. Store the private key and known_hosts entry in GitHub Actions Secrets.
+1. Create a Cloudflare Tunnel for the VPS, for example `dc-chatbot-vps-ssh`.
+2. Publish `ssh.chatbot.waku.dev` to the VPS SSH service, usually `ssh://localhost:22`.
+3. Protect `ssh.chatbot.waku.dev` with a Cloudflare Access application.
+4. Create a dedicated Cloudflare Access Service Token for GitHub Actions SSH deploy.
+5. Create a deploy-only SSH key pair for GitHub Actions.
+6. Add the SSH public key to the VPS deploy user's `authorized_keys`.
+7. Capture the VPS SSH host key and pin it to the Tunnel hostname in `BOT_VPS_KNOWN_HOSTS`, for example `ssh.chatbot.waku.dev ssh-ed25519 ...`.
+8. Store the SSH private key, pinned known_hosts entry, and Cloudflare Access Service Token in GitHub Actions Secrets.
 
-Do not use `ssh-keyscan` inside the workflow as the trust source for production. The workflow expects a pinned `BOT_VPS_KNOWN_HOSTS` secret.
+Do not use `ssh-keyscan` against the public Tunnel hostname as the trust source for production. Prefer reading the VPS host key from the server itself and pinning that key to `ssh.chatbot.waku.dev`.
 
 ## 4. GitHub Actions configuration
 
@@ -222,12 +226,14 @@ Optional Cloudflare variables:
 
 These are required only when `BOT_DEPLOY_TARGET=vps`.
 
-| Secret                    | Purpose                                        |
-| ------------------------- | ---------------------------------------------- |
-| `BOT_VPS_HOST`            | SSH host name or IP address of the VPS.        |
-| `BOT_VPS_USER`            | SSH deploy user.                               |
-| `BOT_VPS_SSH_PRIVATE_KEY` | Private key for the deploy user.               |
-| `BOT_VPS_KNOWN_HOSTS`     | Pinned known_hosts entry for the VPS host key. |
+| Secret                        | Purpose                                                             |
+| ----------------------------- | ------------------------------------------------------------------- |
+| `BOT_VPS_HOST`                | Cloudflare Tunnel SSH hostname, for example `ssh.chatbot.waku.dev`. |
+| `BOT_VPS_USER`                | SSH deploy user.                                                    |
+| `BOT_VPS_SSH_PRIVATE_KEY`     | Private key for the deploy user.                                    |
+| `BOT_VPS_KNOWN_HOSTS`         | Pinned known_hosts entry for the Tunnel hostname and VPS host key.  |
+| `CF_TUNNEL_SSH_CLIENT_ID`     | Cloudflare Access Service Token client ID for SSH deploy.           |
+| `CF_TUNNEL_SSH_CLIENT_SECRET` | Cloudflare Access Service Token client secret for SSH deploy.       |
 
 Do not store `DISCORD_TOKEN` in GitHub Actions for the normal pull-and-start VPS flow. Keep it in the VPS-local service environment or secret store.
 
@@ -363,7 +369,8 @@ Check:
 Check the failed step:
 
 - SSH connection or host key failure
-  - Verify `BOT_VPS_HOST`, `BOT_VPS_USER`, `BOT_VPS_PORT`, `BOT_VPS_SSH_PRIVATE_KEY`, and `BOT_VPS_KNOWN_HOSTS`.
+  - Verify `BOT_VPS_HOST`, `BOT_VPS_USER`, `BOT_VPS_PORT`, `BOT_VPS_SSH_PRIVATE_KEY`, `BOT_VPS_KNOWN_HOSTS`, `CF_TUNNEL_SSH_CLIENT_ID`, and `CF_TUNNEL_SSH_CLIENT_SECRET`.
+  - Confirm the Cloudflare Tunnel is healthy and `ssh.chatbot.waku.dev` routes to `ssh://localhost:22`.
 - `git pull --ff-only` failure
   - Remove local uncommitted changes from the VPS checkout or recreate the checkout.
 - Docker image build failure
@@ -397,4 +404,5 @@ Record any manual operator action in the incident notes without including sensit
 - Rotate `DISCORD_TOKEN` on the VPS-local service environment and restart the Bot service.
 - Rotate Cloudflare Access Service Token in both API Worker secrets and VPS-local Bot runtime secrets.
 - Rotate `BOT_VPS_SSH_PRIVATE_KEY` by updating the VPS authorized key and GitHub Actions secret.
+- Rotate `CF_TUNNEL_SSH_CLIENT_ID` / `CF_TUNNEL_SSH_CLIENT_SECRET` by creating a replacement Cloudflare Access Service Token and updating the SSH Access policy and GitHub secrets.
 - Update `BOT_VPS_KNOWN_HOSTS` only after verifying the VPS host key through a trusted channel.

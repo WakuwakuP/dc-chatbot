@@ -4,17 +4,19 @@ Do not commit secret values. Configure these names in GitHub Actions, Cloudflare
 
 ## GitHub Actions Secrets
 
-| Name                      | Used by                        | Purpose                                                                                                               |
-| ------------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
-| `CLOUDFLARE_API_TOKEN`    | Deploy workflow                | Cloudflare API token with permission to deploy Workers/Pages, manage Worker secrets, and apply D1 migrations.         |
-| `CLOUDFLARE_ACCOUNT_ID`   | Deploy workflow                | Cloudflare account ID. Treat as deployment-sensitive metadata.                                                        |
-| `CF_ACCESS_CLIENT_ID`     | API Worker secret, Bot runtime | Cloudflare Access Service Token client ID used by the Bot Worker for `/api/v1/bot/*`.                                 |
-| `CF_ACCESS_CLIENT_SECRET` | API Worker secret, Bot runtime | Cloudflare Access Service Token client secret used by the Bot Worker for `/api/v1/bot/*`.                             |
-| `NVIDIA_NIM_BEARER_TOKEN` | API Worker secret              | NVIDIA NIM API key value used as the provider `Authorization: Bearer ...` token. Never expose it outside API runtime. |
-| `BOT_VPS_HOST`            | Bot VPS deploy                 | SSH host name or IP address for the Bot VPS. Required only when `BOT_DEPLOY_TARGET=vps`.                              |
-| `BOT_VPS_USER`            | Bot VPS deploy                 | SSH deploy user for the Bot VPS. Required only when `BOT_DEPLOY_TARGET=vps`.                                          |
-| `BOT_VPS_SSH_PRIVATE_KEY` | Bot VPS deploy                 | Private SSH key used by GitHub Actions to connect to the Bot VPS. Required only when `BOT_DEPLOY_TARGET=vps`.         |
-| `BOT_VPS_KNOWN_HOSTS`     | Bot VPS deploy                 | Pinned `known_hosts` entry for strict VPS host key checking. Required only when `BOT_DEPLOY_TARGET=vps`.              |
+| Name                          | Used by                        | Purpose                                                                                                                  |
+| ----------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `CLOUDFLARE_API_TOKEN`        | Deploy workflow                | Cloudflare API token with permission to deploy Workers/Pages, manage Worker secrets, and apply D1 migrations.            |
+| `CLOUDFLARE_ACCOUNT_ID`       | Deploy workflow                | Cloudflare account ID. Treat as deployment-sensitive metadata.                                                           |
+| `CF_ACCESS_CLIENT_ID`         | API Worker secret, Bot runtime | Cloudflare Access Service Token client ID used by the Bot Worker for `/api/v1/bot/*`.                                    |
+| `CF_ACCESS_CLIENT_SECRET`     | API Worker secret, Bot runtime | Cloudflare Access Service Token client secret used by the Bot Worker for `/api/v1/bot/*`.                                |
+| `NVIDIA_NIM_BEARER_TOKEN`     | API Worker secret              | NVIDIA NIM API key value used as the provider `Authorization: Bearer ...` token. Never expose it outside API runtime.    |
+| `BOT_VPS_HOST`                | Bot VPS deploy                 | Cloudflare Tunnel SSH hostname, for example `ssh.chatbot.waku.dev`. Required only when `BOT_DEPLOY_TARGET=vps`.          |
+| `BOT_VPS_USER`                | Bot VPS deploy                 | SSH deploy user for the Bot VPS. Required only when `BOT_DEPLOY_TARGET=vps`.                                             |
+| `BOT_VPS_SSH_PRIVATE_KEY`     | Bot VPS deploy                 | Private SSH key used by GitHub Actions to connect to the Bot VPS through Cloudflare Tunnel. Required for VPS deploy.     |
+| `BOT_VPS_KNOWN_HOSTS`         | Bot VPS deploy                 | Pinned `known_hosts` entry for the Tunnel SSH hostname and VPS SSH host key. Required only when `BOT_DEPLOY_TARGET=vps`. |
+| `CF_TUNNEL_SSH_CLIENT_ID`     | Bot VPS deploy                 | Cloudflare Access Service Token client ID for `ssh.chatbot.waku.dev`. Required only when `BOT_DEPLOY_TARGET=vps`.        |
+| `CF_TUNNEL_SSH_CLIENT_SECRET` | Bot VPS deploy                 | Cloudflare Access Service Token client secret for `ssh.chatbot.waku.dev`. Required only when `BOT_DEPLOY_TARGET=vps`.    |
 
 Do not store `DISCORD_TOKEN` in GitHub Actions for the normal VPS pull-and-start deployment flow. Configure it on the VPS-local service environment or secret store.
 

@@ -37,6 +37,8 @@ jobs:
           CF_ACCESS_AUD: ${{ vars.CF_ACCESS_AUD }}
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          CF_TUNNEL_SSH_CLIENT_ID: ${{ secrets.CF_TUNNEL_SSH_CLIENT_ID }}
+          CF_TUNNEL_SSH_CLIENT_SECRET: ${{ secrets.CF_TUNNEL_SSH_CLIENT_SECRET }}
           CF_ACCESS_TEAM_DOMAIN: ${{ vars.CF_ACCESS_TEAM_DOMAIN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -103,6 +105,8 @@ jobs:
               require_secret BOT_VPS_USER "$BOT_VPS_USER"
               require_secret BOT_VPS_SSH_PRIVATE_KEY "$BOT_VPS_SSH_PRIVATE_KEY"
               require_secret BOT_VPS_KNOWN_HOSTS "$BOT_VPS_KNOWN_HOSTS"
+              require_secret CF_TUNNEL_SSH_CLIENT_ID "$CF_TUNNEL_SSH_CLIENT_ID"
+              require_secret CF_TUNNEL_SSH_CLIENT_SECRET "$CF_TUNNEL_SSH_CLIENT_SECRET"
               require_var BOT_VPS_APP_DIR "$BOT_VPS_APP_DIR"
               require_var BOT_VPS_START_COMMAND "$BOT_VPS_START_COMMAND"
               echo "bot_deploy_target=vps" >> "$GITHUB_OUTPUT"
@@ -314,6 +318,12 @@ jobs:
           chmod 600 ~/.ssh/dc_chatbot_vps
           chmod 644 ~/.ssh/known_hosts
 
+      - name: Install cloudflared
+        run: |
+          curl --fail --location --silent --show-error --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i cloudflared.deb
+          cloudflared --version
+
       - name: Pull repository and start Bot Worker
         env:
           BOT_VPS_APP_DIR: ${{ vars.BOT_VPS_APP_DIR }}
@@ -322,12 +332,15 @@ jobs:
           BOT_VPS_PORT: ${{ vars.BOT_VPS_PORT }}
           BOT_VPS_START_COMMAND: ${{ vars.BOT_VPS_START_COMMAND }}
           BOT_VPS_USER: ${{ secrets.BOT_VPS_USER }}
+          TUNNEL_SERVICE_TOKEN_ID: ${{ secrets.CF_TUNNEL_SSH_CLIENT_ID }}
+          TUNNEL_SERVICE_TOKEN_SECRET: ${{ secrets.CF_TUNNEL_SSH_CLIENT_SECRET }}
         run: |
           remote_branch="${BOT_VPS_BRANCH:-$GITHUB_REF_NAME}"
           remote_port="${BOT_VPS_PORT:-22}"
           ssh -i ~/.ssh/dc_chatbot_vps \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
+            -o "ProxyCommand=cloudflared access ssh --hostname %h" \
             -p "$remote_port" \
             "$BOT_VPS_USER@$BOT_VPS_HOST" \
             sh -s -- "$BOT_VPS_APP_DIR" "$remote_branch" "$BOT_VPS_START_COMMAND" <<'REMOTE'
@@ -350,11 +363,14 @@ jobs:
           BOT_VPS_HOST: ${{ secrets.BOT_VPS_HOST }}
           BOT_VPS_PORT: ${{ vars.BOT_VPS_PORT }}
           BOT_VPS_USER: ${{ secrets.BOT_VPS_USER }}
+          TUNNEL_SERVICE_TOKEN_ID: ${{ secrets.CF_TUNNEL_SSH_CLIENT_ID }}
+          TUNNEL_SERVICE_TOKEN_SECRET: ${{ secrets.CF_TUNNEL_SSH_CLIENT_SECRET }}
         run: |
           remote_port="${BOT_VPS_PORT:-22}"
           ssh -i ~/.ssh/dc_chatbot_vps \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
+            -o "ProxyCommand=cloudflared access ssh --hostname %h" \
             -p "$remote_port" \
             "$BOT_VPS_USER@$BOT_VPS_HOST" \
             sh -s -- "$BOT_VPS_HEALTH_COMMAND" <<'REMOTE'

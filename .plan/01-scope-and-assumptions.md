@@ -48,17 +48,13 @@ API と Web の deploy target は ADR で決定済み。
 - Web: Cloudflare Pages
 - D1: Cloudflare D1
 
-Bot Worker は「Node.js 長寿命 process」として決定済みだが、具体的な hosting target は ADR 上まだ固定されていない。Actions Secrets 設定後に push deploy を完了させるには、Bot deploy target を実装前に確定する必要がある。
+Bot Worker は「Node.js 長寿命 process」として決定済み。Bot deploy target は dedicated VPS 上の Docker Compose とし、GitHub Actions から SSH で repository を更新して `docker compose up -d --build` を実行する。
 
-### Bot deploy target の最小方針
+### Bot deploy target の方針
 
-実装前タスクとして、次のいずれかを ADR または deploy docs に固定する。
-
-- Container host へ deploy: GitHub Actions で Docker image を build/push し、deploy hook または SSH で再起動する
-- Managed Node host へ deploy: GitHub Actions から provider CLI/API で deploy する
-- Self-hosted runner 上で systemd service を更新する
-
-本計画では target 非依存の抽象名として `BOT_DEPLOY_*` secret を定義し、実装タスク内で具体 target に合わせて確定する。
+- Container host へ deploy: GitHub Actions で VPS に SSH 接続し、VPS 上で Docker image を build して Bot container を再起動する
+- Production Discord Bot token と Cloudflare Access Service Token は VPS-local secret として保持し、GitHub Actions の通常 deploy job では転送しない
+- Bot container には `NVIDIA_NIM_BEARER_TOKEN`、D1 credential、local auth bypass secret を渡さない
 
 ## 非対象
 

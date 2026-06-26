@@ -12,6 +12,7 @@ Owner Discord User は Private Bot の利用者と設定を管理し、Registere
 - `docs/adr/README.md` — ADR 索引
 - `docs/adr/*.md` — 個別の設計決定
 - `docs/development/setup-and-deploy-runbook.md` — 開発環境立ち上げ・本番デプロイ手順書
+- `docs/deploy/github-actions-cloudflare-vps.md` — GitHub Actions による Cloudflare + VPS 詳細デプロイ手順書
 - `AGENTS.md` — このリポジトリで作業する AI agent / developer 向けルール
 
 新しい実装判断が既存 ADR と矛盾する場合は、実装へ黙って合わせず、ADR の追加または更新を先に検討してください。

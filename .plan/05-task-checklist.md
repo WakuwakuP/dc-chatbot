@@ -4,7 +4,7 @@
 
 ## Phase 0
 
-- [x] P0-01 Bot deployment target 保留判断を文書化する
+- [x] P0-01 Bot deployment target 判断を文書化する
 - [x] P0-02 Root scripts 方針を確定する
 - [x] P0-03 package naming convention を決める
 
@@ -46,8 +46,8 @@
 - [x] P5-01 Cloudflare D1 migration workflow skeleton を追加する
 - [x] P5-02 API deploy job skeleton を追加する
 - [x] P5-03 Web deploy job skeleton を追加する
-- [x] P5-04 Bot deploy job は target 保留として preflight skip にする
-- [x] P5-05 Deployment verification は target 保留として docs に後続化する
+- [x] P5-04 Bot deploy job は `BOT_DEPLOY_TARGET=vps` で VPS に SSH deploy する
+- [x] P5-05 Deployment verification は Cloudflare smoke と optional VPS health command で実行する
 
 ## Phase 6
 
@@ -64,4 +64,4 @@
 - [x] `pnpm test:e2e`
 - [x] `pnpm build`
 - [x] GitHub Actions CI workflow を追加
-- [x] GitHub Actions deploy skeleton は target 保留時に安全に skip
+- [x] GitHub Actions deploy は Cloudflare deploy と optional VPS Bot deploy を実行

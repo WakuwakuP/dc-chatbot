@@ -1,0 +1,13 @@
+services:
+  bot:
+    build:
+      context: ../../..
+      dockerfile: apps/bot/deploy/Dockerfile
+    image: dc-chatbot-bot:production
+    restart: unless-stopped
+    init: true
+    env_file:
+      - path: /etc/dc-chatbot/bot.env
+        required: false
+    environment:
+      DC_CHATBOT_ENV: production

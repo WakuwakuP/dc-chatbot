@@ -16,7 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       cloudflare_ready: ${{ steps.preflight.outputs.cloudflare_ready }}
-      bot_target_configured: ${{ steps.preflight.outputs.bot_target_configured }}
+      bot_deploy_target: ${{ steps.preflight.outputs.bot_deploy_target }}
+      bot_vps_ready: ${{ steps.preflight.outputs.bot_vps_ready }}
       smoke_ready: ${{ steps.preflight.outputs.smoke_ready }}
     steps:
       - name: Checkout
@@ -27,6 +28,12 @@ jobs:
         env:
           API_SMOKE_URL: ${{ vars.API_SMOKE_URL }}
           BOT_DEPLOY_TARGET: ${{ vars.BOT_DEPLOY_TARGET }}
+          BOT_VPS_APP_DIR: ${{ vars.BOT_VPS_APP_DIR }}
+          BOT_VPS_HOST: ${{ secrets.BOT_VPS_HOST }}
+          BOT_VPS_KNOWN_HOSTS: ${{ secrets.BOT_VPS_KNOWN_HOSTS }}
+          BOT_VPS_SSH_PRIVATE_KEY: ${{ secrets.BOT_VPS_SSH_PRIVATE_KEY }}
+          BOT_VPS_START_COMMAND: ${{ vars.BOT_VPS_START_COMMAND }}
+          BOT_VPS_USER: ${{ secrets.BOT_VPS_USER }}
           CF_ACCESS_AUD: ${{ vars.CF_ACCESS_AUD }}
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
@@ -85,12 +92,29 @@ jobs:
             missing=1
           fi
 
-          if [ -n "$BOT_DEPLOY_TARGET" ]; then
-            echo "bot_target_configured=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::notice::BOT_DEPLOY_TARGET is intentionally pending. See docs/deploy/decisions/bot-deploy-target-pending.md."
-            echo "bot_target_configured=false" >> "$GITHUB_OUTPUT"
-          fi
+          case "$BOT_DEPLOY_TARGET" in
+            "")
+              echo "::notice::BOT_DEPLOY_TARGET is unset. Bot deploy will be skipped. Set BOT_DEPLOY_TARGET=vps to deploy apps/bot to the configured VPS."
+              echo "bot_deploy_target=none" >> "$GITHUB_OUTPUT"
+              echo "bot_vps_ready=false" >> "$GITHUB_OUTPUT"
+              ;;
+            "vps")
+              require_secret BOT_VPS_HOST "$BOT_VPS_HOST"
+              require_secret BOT_VPS_USER "$BOT_VPS_USER"
+              require_secret BOT_VPS_SSH_PRIVATE_KEY "$BOT_VPS_SSH_PRIVATE_KEY"
+              require_secret BOT_VPS_KNOWN_HOSTS "$BOT_VPS_KNOWN_HOSTS"
+              require_var BOT_VPS_APP_DIR "$BOT_VPS_APP_DIR"
+              require_var BOT_VPS_START_COMMAND "$BOT_VPS_START_COMMAND"
+              echo "bot_deploy_target=vps" >> "$GITHUB_OUTPUT"
+              echo "bot_vps_ready=true" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error::Unsupported BOT_DEPLOY_TARGET: $BOT_DEPLOY_TARGET. Supported values are empty or vps."
+              echo "bot_deploy_target=unsupported" >> "$GITHUB_OUTPUT"
+              echo "bot_vps_ready=false" >> "$GITHUB_OUTPUT"
+              missing=1
+              ;;
+          esac
 
           if [ -n "$API_SMOKE_URL" ] && [ -n "$WEB_SMOKE_URL" ]; then
             echo "smoke_ready=true" >> "$GITHUB_OUTPUT"
@@ -270,21 +294,78 @@ jobs:
           CLOUDFLARE_PAGES_PROJECT_NAME: ${{ vars.CLOUDFLARE_PAGES_PROJECT_NAME }}
         run: pnpm dlx wrangler@${{ env.WRANGLER_VERSION }} pages deploy apps/web/dist --project-name "$CLOUDFLARE_PAGES_PROJECT_NAME" --branch "$GITHUB_REF_NAME"
 
-  bot_deploy_placeholder:
-    name: Bot deploy placeholder
-    needs: preflight
+  deploy_bot_vps:
+    name: Deploy Bot on VPS
+    needs:
+      - preflight
+      - deploy_web
+    if: needs.preflight.outputs.bot_vps_ready == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Explain Bot deploy status
+      - name: Configure SSH
         env:
-          BOT_DEPLOY_TARGET_CONFIGURED: ${{ needs.preflight.outputs.bot_target_configured }}
+          BOT_VPS_KNOWN_HOSTS: ${{ secrets.BOT_VPS_KNOWN_HOSTS }}
+          BOT_VPS_SSH_PRIVATE_KEY: ${{ secrets.BOT_VPS_SSH_PRIVATE_KEY }}
         run: |
-          if [ "$BOT_DEPLOY_TARGET_CONFIGURED" = "true" ]; then
-            echo "::error::BOT_DEPLOY_TARGET is configured, but no target-specific Bot deploy job exists yet."
-            echo "Document the target and replace this placeholder before deploying apps/bot."
-            exit 1
-          fi
-          echo "Bot deploy target is intentionally pending. See docs/deploy/decisions/bot-deploy-target-pending.md and apps/bot/deploy/README.md."
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$BOT_VPS_SSH_PRIVATE_KEY" > ~/.ssh/dc_chatbot_vps
+          printf '%s\n' "$BOT_VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/dc_chatbot_vps
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Pull repository and start Bot Worker
+        env:
+          BOT_VPS_APP_DIR: ${{ vars.BOT_VPS_APP_DIR }}
+          BOT_VPS_BRANCH: ${{ vars.BOT_VPS_BRANCH }}
+          BOT_VPS_HOST: ${{ secrets.BOT_VPS_HOST }}
+          BOT_VPS_PORT: ${{ vars.BOT_VPS_PORT }}
+          BOT_VPS_START_COMMAND: ${{ vars.BOT_VPS_START_COMMAND }}
+          BOT_VPS_USER: ${{ secrets.BOT_VPS_USER }}
+        run: |
+          remote_branch="${BOT_VPS_BRANCH:-$GITHUB_REF_NAME}"
+          remote_port="${BOT_VPS_PORT:-22}"
+          ssh -i ~/.ssh/dc_chatbot_vps \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -p "$remote_port" \
+            "$BOT_VPS_USER@$BOT_VPS_HOST" \
+            sh -s -- "$BOT_VPS_APP_DIR" "$remote_branch" "$BOT_VPS_START_COMMAND" <<'REMOTE'
+          set -eu
+          repo_dir="$1"
+          branch="$2"
+          start_command="$3"
+
+          cd "$repo_dir"
+          git fetch --prune origin
+          git checkout "$branch"
+          git pull --ff-only origin "$branch"
+          sh -lc "$start_command"
+          REMOTE
+
+      - name: Bot VPS health command
+        if: vars.BOT_VPS_HEALTH_COMMAND != ''
+        env:
+          BOT_VPS_HEALTH_COMMAND: ${{ vars.BOT_VPS_HEALTH_COMMAND }}
+          BOT_VPS_HOST: ${{ secrets.BOT_VPS_HOST }}
+          BOT_VPS_PORT: ${{ vars.BOT_VPS_PORT }}
+          BOT_VPS_USER: ${{ secrets.BOT_VPS_USER }}
+        run: |
+          remote_port="${BOT_VPS_PORT:-22}"
+          ssh -i ~/.ssh/dc_chatbot_vps \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -p "$remote_port" \
+            "$BOT_VPS_USER@$BOT_VPS_HOST" \
+            sh -s -- "$BOT_VPS_HEALTH_COMMAND" <<'REMOTE'
+          set -eu
+          health_command="$1"
+          sh -lc "$health_command"
+          REMOTE
+
+      - name: Bot VPS health command not configured
+        if: vars.BOT_VPS_HEALTH_COMMAND == ''
+        run: echo "::notice::BOT_VPS_HEALTH_COMMAND is unset. Bot deploy relies on the start command exit status."
 
   smoke:
     name: Smoke check

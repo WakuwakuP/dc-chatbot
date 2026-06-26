@@ -150,14 +150,14 @@ docker compose down --volumes
 
 ### 2.1 現在のデプロイ対象
 
-| Component  | Target                              | Status                       |
-| ---------- | ----------------------------------- | ---------------------------- |
-| `apps/api` | Cloudflare Workers                  | Deploy workflow 対象         |
-| `apps/web` | Cloudflare Pages                    | Deploy workflow 対象         |
-| D1         | Cloudflare D1                       | Deploy workflow で migration |
-| `apps/bot` | Pending long-running Node.js target | まだ本番デプロイ対象ではない |
+| Component  | Target                | Status                            |
+| ---------- | --------------------- | --------------------------------- |
+| `apps/api` | Cloudflare Workers    | Deploy workflow 対象              |
+| `apps/web` | Cloudflare Pages      | Deploy workflow 対象              |
+| D1         | Cloudflare D1         | Deploy workflow で migration      |
+| `apps/bot` | Docker Compose on VPS | `BOT_DEPLOY_TARGET=vps` で deploy |
 
-Bot Worker の本番 hosting target は未決定です。`BOT_DEPLOY_TARGET` を設定すると、現在の deploy workflow は placeholder job で失敗します。Bot 本番デプロイを有効化する前に、`docs/deploy/decisions/bot-deploy-target-pending.md`、`apps/bot/deploy/README.md`、`.github/workflows/deploy.yml` を同じ変更で更新してください。
+Bot Worker の本番 hosting target は Docker Compose を使う dedicated VPS です。GitHub Actions は VPS に SSH 接続し、repository を `git pull --ff-only` してから configured Docker Compose start command を実行します。詳細は `docs/deploy/github-actions-cloudflare-vps.md`、`docs/deploy/decisions/bot-deploy-target-vps.md`、`apps/bot/deploy/README.md` を参照してください。
 
 ### 2.2 Cloudflare 側の事前準備
 
@@ -192,9 +192,14 @@ Required GitHub Actions Secrets:
 - `CF_ACCESS_CLIENT_SECRET`
 - `NVIDIA_NIM_BEARER_TOKEN`
 
-Optional GitHub Actions Secrets:
+VPS Bot deploy を有効化する場合に追加で必要な GitHub Actions Secrets:
 
-- `DISCORD_TOKEN` — future Bot target 用。現在の API/Web deploy では使いません
+- `BOT_VPS_HOST`
+- `BOT_VPS_USER`
+- `BOT_VPS_SSH_PRIVATE_KEY`
+- `BOT_VPS_KNOWN_HOSTS`
+
+`DISCORD_TOKEN` は通常の VPS pull-and-start flow では GitHub Actions に保存せず、VPS-local service environment または secret store に置きます。
 
 Required GitHub Actions Variables:
 
@@ -206,13 +211,21 @@ Required GitHub Actions Variables:
 - `VITE_API_BASE_URL`
 - `LLM_PROVIDER` — production では `nvidia_nim`
 
+VPS Bot deploy を有効化する場合に追加で必要な GitHub Actions Variables:
+
+- `BOT_DEPLOY_TARGET` — `vps`
+- `BOT_VPS_APP_DIR` — 例: `/srv/dc-chatbot`
+- `BOT_VPS_START_COMMAND` — 例: `docker compose -f apps/bot/deploy/compose.production.yml up -d --build bot`
+
 Optional GitHub Actions Variables:
 
 - `API_WORKER_NAME` — 未設定なら `dc-chatbot-api`
 - `NVIDIA_NIM_BASE_URL` — default NVIDIA NIM endpoint を override する場合だけ
 - `API_SMOKE_URL` — 設定時のみ smoke check
 - `WEB_SMOKE_URL` — 設定時のみ smoke check
-- `BOT_DEPLOY_TARGET` — 現時点では未設定にしてください
+- `BOT_VPS_BRANCH` — 未設定なら workflow branch
+- `BOT_VPS_PORT` — 未設定なら `22`
+- `BOT_VPS_HEALTH_COMMAND` — 例: `docker compose -f apps/bot/deploy/compose.production.yml ps --status running bot`
 
 ### 2.4 デプロイ前チェック
 
@@ -247,7 +260,8 @@ Deploy workflow の流れ:
 1. **Deploy preflight**
    - required Secrets / Variables の存在確認
    - production Wrangler config が `ALLOW_LOCAL_AUTH_BYPASS=true` ではないことの確認
-   - `BOT_DEPLOY_TARGET` が未設定であることの notice
+   - `LLM_PROVIDER=nvidia_nim` の確認
+   - `BOT_DEPLOY_TARGET=vps` の場合は VPS deploy 設定の確認
 2. **Apply D1 migrations**
    - forward-only migration policy check
    - D1 binding patch
@@ -259,9 +273,11 @@ Deploy workflow の流れ:
 4. **Deploy Web Pages**
    - `VITE_API_BASE_URL` 付きで `@dc-chatbot/web` build
    - `apps/web/dist` を Cloudflare Pages に deploy
-5. **Bot deploy placeholder**
-   - `BOT_DEPLOY_TARGET` 未設定なら成功
-   - 設定済みなら失敗
+5. **Deploy Bot on VPS**
+   - `BOT_DEPLOY_TARGET=vps` の場合のみ実行
+   - VPS に SSH 接続し、`git fetch` / `git checkout` / `git pull --ff-only` を実行
+   - `BOT_VPS_START_COMMAND` で Docker image build と container start を実行
+   - optional `BOT_VPS_HEALTH_COMMAND` を実行
 6. **Smoke check**
    - `API_SMOKE_URL` と `WEB_SMOKE_URL` が両方ある場合のみ実行
    - API `/health` と Web origin を確認
@@ -290,7 +306,8 @@ Deploy workflow の流れ:
 - **preflight が失敗した場合**
   - GitHub Actions Secrets / Variables の不足を修正します。
   - `ALLOW_LOCAL_AUTH_BYPASS=true` が production Wrangler config に入っていないか確認します。
-  - `BOT_DEPLOY_TARGET` は未設定に戻します。
+  - `BOT_DEPLOY_TARGET` は空または `vps` のみ有効です。
+  - `BOT_DEPLOY_TARGET=vps` の場合は VPS SSH secrets と `BOT_VPS_APP_DIR` / `BOT_VPS_START_COMMAND` を確認します。
 - **D1 migration が失敗した場合**
   - deploy は停止します。
   - down migration ではなく、新しい forward-fix migration で修正します。
@@ -301,22 +318,19 @@ Deploy workflow の流れ:
 - **Web deploy が失敗した場合**
   - `@dc-chatbot/web` build と `VITE_API_BASE_URL` を確認します。
   - Cloudflare Pages project name を確認します。
+- **Bot VPS deploy が失敗した場合**
+  - SSH 接続、pinned `known_hosts`、deploy user、VPS repository checkout を確認します。
+  - `git pull --ff-only` が失敗する場合は VPS checkout の local change を解消します。
+  - Docker image build が失敗する場合は Docker/Compose、lockfile、package build を確認します。
+  - start / health command が失敗する場合は Docker Compose 設定と VPS-local service environment を確認します。
 - **smoke check が失敗した場合**
   - `API_SMOKE_URL` / `WEB_SMOKE_URL` の origin、Access policy、route/custom domain を確認します。
   - smoke check では Discord message content や provider payload を送らないでください。
 
-### 2.8 Bot 本番デプロイを有効化する前に必要なこと
+### 2.8 Bot VPS runtime の注意
 
-Bot hosting target を選ぶまでは、本番 Bot デプロイは実施しません。有効化する変更では最低限、次を文書化・実装してください。
+Bot production runtime に必要な環境変数は `apps/bot/deploy/README.md` を正とします。local-only の `DISCORD_DEV_TOKEN`、`DISCORD_DEV_GUILD_ID`、`DISCORD_DEV_ALLOWED_USER_IDS`、`DC_CHATBOT_ALLOW_DEV_BOT=true` は production runtime に渡さないでください。
 
-- long-running Node.js process の hosting target
-- secret injection mechanism
-- process supervision / restart policy
-- metadata-only logging controls
-- Discord と API origin への network egress
-- rollout / forward-fix policy
-- `DISCORD_TOKEN` と Cloudflare Access Service Token の runtime mapping
-- `.github/workflows/deploy.yml` の Bot placeholder を置き換える target-specific job
-- sensitive content を送らない smoke check
+VPS-local runtime secrets には `/etc/dc-chatbot/bot.env` などで `DISCORD_TOKEN`、`DC_CHATBOT_API_BASE_URL`、`CF_ACCESS_CLIENT_ID`、`CF_ACCESS_CLIENT_SECRET` を設定します。Bot Worker container には `NVIDIA_NIM_BEARER_TOKEN`、D1 credential、local auth bypass secret を渡しません。
 
-Bot production runtime に必要な環境変数は `apps/bot/deploy/README.md` を正とします。local-only の `DISCORD_DEV_TOKEN`、`DISCORD_DEV_GUILD_ID`、`DC_CHATBOT_ALLOW_DEV_BOT=true` は production runtime に渡さないでください。
+詳細な operator 手順は `docs/deploy/github-actions-cloudflare-vps.md` を参照してください。

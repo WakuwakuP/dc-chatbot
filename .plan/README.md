@@ -25,9 +25,9 @@ Actions Secret を設定し、GitHub の main branch へ push したら本実装
 - [x] unit test が存在し、`pnpm test:unit` が成功する
 - [x] e2e test が存在し、`pnpm test:e2e` が成功する
 - [x] GitHub Actions CI が check / lint / format / unit / e2e / build を実行する
-- [x] GitHub Actions CD skeleton が preflight を実行し、デプロイ先未決定時は platform command 前に安全に skip する
+- [x] GitHub Actions CD が preflight を実行し、Cloudflare deploy と VPS Bot deploy を分岐できる
 - [x] Required Actions Secrets の一覧が `README.md` または deploy docs に記載されている
-- [x] Bot deploy target はユーザー指示により保留し、理由と後続判断を `docs/deploy/decisions/bot-deploy-target-pending.md` に記録している
+- [x] Bot deploy target は dedicated VPS とし、判断を `docs/deploy/decisions/bot-deploy-target-vps.md` に記録している
 
 ## 実装時の注意
 

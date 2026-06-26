@@ -114,25 +114,23 @@ preflight -> migrate-d1 -> deploy-api -> deploy-web -> deploy-bot -> smoke
 
 ### Bot Worker
 
-Bot hosting target は P0-01 で確定する。抽象的には以下が必要。
+Bot hosting target は dedicated VPS 上の Docker Compose とする。GitHub Actions には VPS へ SSH するための値だけを置き、production Discord Bot token は VPS-local secret として管理する。
 
 | Secret | 用途 |
 | --- | --- |
-| `DISCORD_BOT_TOKEN` | Bot Worker production token。repository に保存しない |
-| `DISCORD_APPLICATION_ID` | Discord Application ID |
-| `BOT_API_BASE_URL` | Bot Worker が呼ぶ API base URL |
-| `BOT_DEPLOY_TARGET` | Bot deploy target identifier |
-| `BOT_DEPLOY_TOKEN` | Deploy provider token / deploy hook token / SSH key 等 |
-| `BOT_DEPLOY_HEALTH_URL` | Deploy 後 smoke check URL。target により不要なら省略 |
+| `BOT_VPS_HOST` | SSH host |
+| `BOT_VPS_USER` | SSH user |
+| `BOT_VPS_SSH_PRIVATE_KEY` | deploy key |
+| `BOT_VPS_KNOWN_HOSTS` | pinned known_hosts entry |
 
-Bot deploy target が SSH の場合の候補:
+VPS deploy 用 Actions Variables:
 
-| Secret | 用途 |
+| Variable | 用途 |
 | --- | --- |
-| `BOT_DEPLOY_HOST` | SSH host |
-| `BOT_DEPLOY_USER` | SSH user |
-| `BOT_DEPLOY_SSH_KEY` | deploy key |
-| `BOT_DEPLOY_SERVICE_NAME` | systemd service name |
+| `BOT_DEPLOY_TARGET` | `vps` で VPS deploy を有効化 |
+| `BOT_VPS_APP_DIR` | VPS 上の repository checkout path |
+| `BOT_VPS_START_COMMAND` | 例: `docker compose -f apps/bot/deploy/compose.production.yml up -d --build bot` |
+| `BOT_VPS_HEALTH_COMMAND` | 任意。例: `docker compose -f apps/bot/deploy/compose.production.yml ps --status running bot` |
 
 Bot deploy target が container registry + webhook の場合の候補:
 

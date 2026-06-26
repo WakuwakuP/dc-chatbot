@@ -110,8 +110,9 @@ function logDiscordMessageReceived(
 }
 
 function getTriggerKind(message: Message, client: Client): TriggerKind | null {
-  const isTrigger = isDirectMessage(message) || isGuildMention(message, client);
-  if (!isTrigger) {
+  const isDm = isDirectMessage(message);
+  const isGuild = message.guildId !== null;
+  if (!isDm && !isGuild) {
     return null;
   }
 
@@ -119,11 +120,11 @@ function getTriggerKind(message: Message, client: Client): TriggerKind | null {
     return "automated_trigger_source";
   }
 
-  if (isDirectMessage(message)) {
+  if (isDm) {
     return "dm";
   }
 
-  return "guild_mention";
+  return isGuildMention(message, client) ? "guild_mention" : "guild_message";
 }
 
 function displayNameSnapshot(message: Message): string {
@@ -218,6 +219,12 @@ function shouldProceedToRespond(intake: BotMessageIntakeResponse): boolean {
     intake.action === "fetch_context" ||
     intake.action === "respond_without_context"
   );
+}
+
+function shouldRunResponseDecisionBeforeTyping(
+  triggerKind: TriggerKind,
+): boolean {
+  return triggerKind === "guild_mention" || triggerKind === "guild_message";
 }
 
 function authorRelationFor(
@@ -627,39 +634,60 @@ export async function handleDiscordMessageCreate(
     return;
   }
 
-  await runWithTypingMaintenance(message.channel, async () => {
-    let contextMessages: ConversationContextMessageInput[];
+  let contextMessages: ConversationContextMessageInput[];
+  try {
+    contextMessages = await fetchContextMessages(
+      message,
+      client,
+      intakeResponse.contextFetchPlan,
+    );
+  } catch {
+    if (!shouldAvoidAutomatedReply) {
+      await safeReply(message, CONTEXT_FETCH_FAILED_MESSAGE);
+    }
+    return;
+  }
+
+  const responseRequest: BotRespondRequest = {
+    requestId: intakeRequest.requestId,
+    triggerMessageId: message.id,
+    triggerAuthorDiscordUserId: message.author.id,
+    triggerKind,
+    model: config.defaultModel,
+    conversationContextMessageIds: contextMessages.map(
+      (contextMessage) => contextMessage.messageId,
+    ),
+    conversationContextMessages: contextMessages,
+  };
+  if (triggerKind !== "automated_trigger_source") {
+    responseRequest.attachmentMetadata = buildAttachmentMetadata(message);
+  }
+
+  if (shouldRunResponseDecisionBeforeTyping(triggerKind)) {
     try {
-      contextMessages = await fetchContextMessages(
-        message,
-        client,
-        intakeResponse.contextFetchPlan,
-      );
+      const decisionResponse = await apiClient.requestResponse({
+        ...responseRequest,
+        respondMode: "decision_only",
+      });
+      if (decisionResponse.decision.shouldRespond === false) {
+        return;
+      }
     } catch {
       if (!shouldAvoidAutomatedReply) {
-        await safeReply(message, CONTEXT_FETCH_FAILED_MESSAGE);
+        await safeReply(message, RESPONSE_GENERATION_FAILED_MESSAGE);
       }
       return;
     }
+  }
 
-    const responseRequest: BotRespondRequest = {
-      requestId: intakeRequest.requestId,
-      triggerMessageId: message.id,
-      triggerAuthorDiscordUserId: message.author.id,
-      triggerKind,
-      model: config.defaultModel,
-      conversationContextMessageIds: contextMessages.map(
-        (contextMessage) => contextMessage.messageId,
-      ),
-      conversationContextMessages: contextMessages,
-    };
-    if (triggerKind !== "automated_trigger_source") {
-      responseRequest.attachmentMetadata = buildAttachmentMetadata(message);
-    }
-
+  await runWithTypingMaintenance(message.channel, async () => {
     try {
-      const response = await apiClient.requestResponse(responseRequest);
-      if (response.decision?.shouldRespond === false) {
+      const response = await apiClient.requestResponse(
+        shouldRunResponseDecisionBeforeTyping(triggerKind)
+          ? { ...responseRequest, respondMode: "generate_only" }
+          : responseRequest,
+      );
+      if (response.decision.shouldRespond === false) {
         return;
       }
       await sendReplyChunks(message, response.replyChunks);

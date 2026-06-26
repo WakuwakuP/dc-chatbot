@@ -21,6 +21,7 @@ export type OwnerRole = v.InferOutput<typeof OwnerRoleSchema>;
 export const TriggerKindSchema = v.picklist([
   "dm",
   "guild_mention",
+  "guild_message",
   "automated_trigger_source",
 ]);
 export type TriggerKind = v.InferOutput<typeof TriggerKindSchema>;
@@ -543,6 +544,7 @@ export const BotMessageIntakeResponseSchema = v.object({
   reason: v.picklist([
     "allowed_dm",
     "allowed_guild_mention",
+    "allowed_guild_message",
     "allowed_automated_source",
     "non_allowed_user",
     "automated_source_ignored",
@@ -583,6 +585,9 @@ export const BotRespondRequestSchema = v.object({
   triggerAuthorDiscordUserId: DiscordSnowflakeSchema,
   triggerAuthorApplicationId: v.optional(DiscordSnowflakeSchema),
   triggerKind: TriggerKindSchema,
+  respondMode: v.optional(
+    v.picklist(["decide_and_generate", "decision_only", "generate_only"]),
+  ),
   model: v.pipe(v.string(), v.minLength(1), v.maxLength(80)),
   conversationContextMessageIds: v.array(DiscordSnowflakeSchema),
   conversationContextMessages: v.optional(

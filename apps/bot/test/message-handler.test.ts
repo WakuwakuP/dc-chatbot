@@ -266,14 +266,18 @@ describe("handleDiscordMessageCreate", () => {
         includeTriggerMessage: true,
       },
     });
-    vi.mocked(apiClient.requestResponse).mockResolvedValue({
-      requestId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
-      decision: {
-        shouldRespond: true,
-        reason: "selected_context_available",
-      },
-      replyChunks: ["r"],
-      providerCallId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    vi.mocked(apiClient.requestResponse).mockImplementation(async (request) => {
+      expect(request.respondMode).toBeUndefined();
+      expect(channel.sendTyping).toHaveBeenCalled();
+      return {
+        requestId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        decision: {
+          shouldRespond: true,
+          reason: "selected_context_available",
+        },
+        replyChunks: ["r"],
+        providerCallId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      };
     });
 
     await handleDiscordMessageCreate(
@@ -457,6 +461,85 @@ describe("handleDiscordMessageCreate", () => {
     expect(apiClient.requestResponse).toHaveBeenCalled();
     expect(triggerMessage.reply).not.toHaveBeenCalled();
     expect(channel.send).not.toHaveBeenCalled();
+  });
+
+  it("treats allowed guild messages without a bot mention as Response Triggers", async () => {
+    const channel = createChannel();
+    const triggerMessage = createMessage({
+      id: "12",
+      authorId: "100",
+      channel,
+      guildId: "10",
+      mentionedBot: false,
+    });
+    channel.messages.fetch.mockResolvedValue(
+      new Map([[triggerMessage.id, triggerMessage]]),
+    );
+    const apiClient = createApiClient();
+    vi.mocked(apiClient.intakeMessage).mockResolvedValue({
+      requestId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      action: "fetch_context",
+      reason: "allowed_guild_message",
+      contextFetchPlan: {
+        kind: "guild_recent",
+        limit: 1,
+        includeTriggerMessage: true,
+      },
+    });
+    vi.mocked(apiClient.requestResponse).mockImplementation(async (request) => {
+      if (request.respondMode === "decision_only") {
+        expect(channel.sendTyping).not.toHaveBeenCalled();
+        return {
+          requestId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+          decision: {
+            shouldRespond: true,
+            reason: "selected_context_available",
+          },
+          replyChunks: [],
+          providerCallId: null,
+        };
+      }
+      expect(request.respondMode).toBe("generate_only");
+      expect(channel.sendTyping).toHaveBeenCalled();
+      return {
+        requestId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        decision: {
+          shouldRespond: true,
+          reason: "selected_context_available",
+        },
+        replyChunks: ["r"],
+        providerCallId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      };
+    });
+
+    await handleDiscordMessageCreate(
+      triggerMessage,
+      createClient(),
+      BASE_CONFIG,
+      apiClient,
+      createLogger(),
+    );
+
+    expect(apiClient.intakeMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        triggerKind: "guild_message",
+      }),
+    );
+    expect(apiClient.requestResponse).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        triggerKind: "guild_message",
+        respondMode: "decision_only",
+      }),
+    );
+    expect(apiClient.requestResponse).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        triggerKind: "guild_message",
+        respondMode: "generate_only",
+      }),
+    );
+    expect(triggerMessage.reply).toHaveBeenCalledWith("r");
   });
 
   it("sends a safe Japanese fallback when response generation fails", async () => {

@@ -3,6 +3,8 @@ import type {
   LLMProvider,
   ProviderGenerateRequest,
   ProviderGenerateResponse,
+  ProviderResponseDecisionRequest,
+  ProviderResponseDecisionResponse,
   ProviderRuntimeStatus,
 } from "./types";
 
@@ -33,6 +35,22 @@ export class FakeLLMProvider implements LLMProvider {
       providerCallId: this.providerCallIdFactory(),
       model: request.model,
       replyText: `Fake provider response for ${request.triggerKind}.`,
+    };
+  }
+
+  async decideResponse(
+    request: ProviderResponseDecisionRequest,
+  ): Promise<ProviderResponseDecisionResponse> {
+    return {
+      providerCallId: this.providerCallIdFactory(),
+      model: request.model,
+      decision: {
+        shouldRespond: true,
+        reason:
+          request.triggerKind === "dm"
+            ? "dm_allowed"
+            : "selected_context_available",
+      },
     };
   }
 }

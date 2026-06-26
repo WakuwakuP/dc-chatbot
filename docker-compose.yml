@@ -5,7 +5,12 @@ services:
     working_dir: /workspace
     command: >-
       sh -c "corepack enable && pnpm install --frozen-lockfile &&
-      printf 'LOCAL_AUTH_BYPASS_SECRET=%s\n' "$$LOCAL_AUTH_BYPASS_SECRET" > apps/api/.dev.vars &&
+      {
+      printf 'LOCAL_AUTH_BYPASS_SECRET=%s\n' "$$LOCAL_AUTH_BYPASS_SECRET";
+      [ -n "$$LLM_PROVIDER" ] && printf 'LLM_PROVIDER=%s\n' "$$LLM_PROVIDER";
+      [ -n "$$NVIDIA_NIM_BEARER_TOKEN" ] && printf 'NVIDIA_NIM_BEARER_TOKEN=%s\n' "$$NVIDIA_NIM_BEARER_TOKEN";
+      [ -n "$$NVIDIA_NIM_BASE_URL" ] && printf 'NVIDIA_NIM_BASE_URL=%s\n' "$$NVIDIA_NIM_BASE_URL";
+      } > apps/api/.dev.vars &&
       pnpm --filter @dc-chatbot/api dev:prepare &&
       pnpm --filter @dc-chatbot/api dev"
     environment:
@@ -15,6 +20,9 @@ services:
       LOCAL_AUTH_BYPASS_SECRET: ${LOCAL_AUTH_BYPASS_SECRET:-local-auth-bypass-secret}
       CF_ACCESS_CLIENT_ID: ${CF_ACCESS_CLIENT_ID:-local-dev-client-id}
       CF_ACCESS_CLIENT_SECRET: ${CF_ACCESS_CLIENT_SECRET:-local-dev-client-secret}
+      LLM_PROVIDER: ${LLM_PROVIDER:-fake}
+      NVIDIA_NIM_BEARER_TOKEN: ${NVIDIA_NIM_BEARER_TOKEN:-}
+      NVIDIA_NIM_BASE_URL: ${NVIDIA_NIM_BASE_URL:-}
       COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
       PORT: "8787"
     ports:

@@ -118,6 +118,126 @@ describe("NvidiaNimLLMProvider", () => {
     expect(fetchMock).toHaveBeenCalled();
   });
 
+  it("calls fetch with the global receiver for workerd compatibility", async () => {
+    const fetchMock = vi.fn(async function (
+      this: unknown,
+      _input: string | URL | Request,
+    ) {
+      expect(this).toBe(globalThis);
+      return new Response(
+        JSON.stringify({
+          model: "meta/llama-3.1-70b-instruct",
+          choices: [{ message: { content: "ok" } }],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    const provider = new NvidiaNimLLMProvider({
+      bearerToken: "x",
+      fetch: fetchMock,
+      providerCallIdFactory: () => TEST_PROVIDER_CALL_ID,
+    });
+
+    await provider.generateResponse({
+      requestId: "01HY0000000000000000000000",
+      model: "meta/llama-3.1-70b-instruct",
+      triggerKind: "dm",
+      conversationContextMessageIds: [],
+    });
+
+    expect(fetchMock).toHaveBeenCalled();
+  });
+
+  it("uses the response decision model and parses a metadata-only decision", async () => {
+    const fetchMock = vi.fn(
+      async (_input: string | URL | Request, init: RequestInit | undefined) => {
+        const body = JSON.parse(String(init?.body)) as {
+          model: string;
+          messages: readonly { role: string; content: string }[];
+        };
+
+        expect(body.model).toBe("nvidia/decision-model");
+        expect(body.messages[0]?.content).toContain("shouldRespond");
+        expect(body.messages[1]?.content).toContain(
+          "triggerKind=guild_mention",
+        );
+        expect(body.messages[1]?.content).toContain("content:");
+
+        return new Response(
+          JSON.stringify({
+            model: "nvidia/decision-model",
+            choices: [{ message: { content: '{"shouldRespond":false}' } }],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      },
+    );
+    const provider = new NvidiaNimLLMProvider({
+      bearerToken: "x",
+      fetch: fetchMock,
+      providerCallIdFactory: () => TEST_PROVIDER_CALL_ID,
+    });
+
+    await expect(
+      provider.decideResponse({
+        requestId: "01HY0000000000000000000000",
+        model: "nvidia/decision-model",
+        triggerKind: "guild_mention",
+        triggerMessageId: "100",
+        selectedContextMessageIds: ["100"],
+        conversationContextMessages: [
+          {
+            messageId: "100",
+            authorRelation: "trigger_user",
+            content: "mention text",
+          },
+        ],
+      }),
+    ).resolves.toEqual({
+      providerCallId: TEST_PROVIDER_CALL_ID,
+      model: "nvidia/decision-model",
+      decision: {
+        shouldRespond: false,
+        reason: "trigger_message_not_selected",
+      },
+    });
+  });
+
+  it("maps invalid response decision JSON to a safe provider error category", async () => {
+    const provider = new NvidiaNimLLMProvider({
+      bearerToken: "x",
+      fetch: async () =>
+        new Response(
+          JSON.stringify({
+            model: "nvidia/decision-model",
+            choices: [{ message: { content: "not json" } }],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      providerCallIdFactory: () => TEST_PROVIDER_CALL_ID,
+    });
+
+    await expect(
+      provider.decideResponse({
+        requestId: "01HY0000000000000000000000",
+        model: "nvidia/decision-model",
+        triggerKind: "guild_mention",
+        triggerMessageId: "100",
+        selectedContextMessageIds: ["100"],
+        conversationContextMessages: [
+          {
+            messageId: "100",
+            authorRelation: "trigger_user",
+            content: "mention text",
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({
+      name: "ProviderError",
+      safeCategory: "invalid_response",
+    } satisfies Partial<ProviderError>);
+  });
+
   it("maps missing NVIDIA NIM API Key configuration to a safe category", () => {
     expect(
       () =>
@@ -170,6 +290,48 @@ describe("NvidiaNimLLMProvider", () => {
     ).rejects.toMatchObject({
       name: "ProviderError",
       safeCategory: "rate_limited",
+    } satisfies Partial<ProviderError>);
+  });
+
+  it("maps missing model or endpoint configuration to a safe category", async () => {
+    const provider = new NvidiaNimLLMProvider({
+      bearerToken: "x",
+      fetch: async () => new Response(null, { status: 404 }),
+      providerCallIdFactory: () => TEST_PROVIDER_CALL_ID,
+    });
+
+    await expect(
+      provider.generateResponse({
+        requestId: "01HY0000000000000000000000",
+        model: "meta/missing-model",
+        triggerKind: "dm",
+        conversationContextMessageIds: [],
+      }),
+    ).rejects.toMatchObject({
+      name: "ProviderError",
+      safeCategory: "not_configured",
+    } satisfies Partial<ProviderError>);
+  });
+
+  it("maps provider network failures to temporary unavailable", async () => {
+    const provider = new NvidiaNimLLMProvider({
+      bearerToken: "x",
+      fetch: async () => {
+        throw new TypeError("fetch failed");
+      },
+      providerCallIdFactory: () => TEST_PROVIDER_CALL_ID,
+    });
+
+    await expect(
+      provider.generateResponse({
+        requestId: "01HY0000000000000000000000",
+        model: "meta/llama-3.1-70b-instruct",
+        triggerKind: "dm",
+        conversationContextMessageIds: [],
+      }),
+    ).rejects.toMatchObject({
+      name: "ProviderError",
+      safeCategory: "temporary_unavailable",
     } satisfies Partial<ProviderError>);
   });
 });

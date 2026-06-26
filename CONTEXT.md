@@ -33,7 +33,7 @@ An **Owner Discord User**'s act of adding a Discord User as a **Registered Membe
 _Avoid_: Signup, public registration, self-service registration
 
 **Owner Notification**:
-A private notice sent to the configured notification **Owner Discord User** when a non-allowed Discord user directly tries to use the bot by DM. It informs the owner side without replying to the non-allowed user; non-allowed guild mentions are visible in management metadata but do not send DM notifications.
+A private notice sent to the configured notification **Owner Discord User** when a non-allowed Discord user directly tries to use the bot by DM. It informs the owner side without replying to the non-allowed user; non-allowed guild channel messages are visible in management metadata but do not send DM notifications.
 _Avoid_: Public denial, user-facing rejection, moderation alert
 
 **Owner Discord User**:
@@ -57,11 +57,11 @@ The decision about which recent Discord messages belong in **Conversation Contex
 _Avoid_: Transcript import, channel archive, memory retrieval
 
 **Response Trigger**:
-A Discord message pattern that makes the bot consider responding. Direct messages from an **Allowed Discord User** always trigger consideration; guild messages trigger consideration only when the bot is mentioned. Automated bot or webhook messages are ignored by default and can trigger consideration only when explicitly allowed by an Admin Owner.
+A Discord message pattern that makes the bot consider responding. Direct messages from an **Allowed Discord User** always trigger consideration; guild channel messages from an **Allowed Discord User** trigger consideration even without a bot mention, and the final **Response Decision** determines whether to reply. Automated bot or webhook messages are ignored by default and can trigger consideration only when explicitly allowed by an Admin Owner.
 _Avoid_: Listener, command, subscription
 
 **Response Decision**:
-The bot's decision to actually reply after a **Response Trigger**. The decision is rule-based for obvious cases and may use the provider adapter through Configured Provider Access for ambiguous guild mentions.
+The bot's decision to actually reply after a **Response Trigger**. The decision is rule-based for obvious cases and may use the provider adapter through Configured Provider Access for ambiguous guild channel messages.
 _Avoid_: Auto-reply, command execution
 
 ## Example dialogue

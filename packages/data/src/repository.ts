@@ -225,7 +225,12 @@ export type OwnerNotificationRecord = {
   notificationOwnerDiscordUserId: string;
   candidateDiscordUserId: string | null;
   requestId: string | null;
-  triggerKind: "dm" | "guild_mention" | "automated_trigger_source" | null;
+  triggerKind:
+    | "dm"
+    | "guild_mention"
+    | "guild_message"
+    | "automated_trigger_source"
+    | null;
   status: OwnerNotificationStatus;
   safeErrorCategory: OwnerNotificationDeliverySafeErrorCategory | null;
   createdAt: string;
@@ -326,7 +331,12 @@ type OwnerNotificationRow = {
   notification_owner_discord_user_id: string;
   candidate_discord_user_id: string | null;
   request_id: string | null;
-  trigger_kind: "dm" | "guild_mention" | "automated_trigger_source" | null;
+  trigger_kind:
+    | "dm"
+    | "guild_mention"
+    | "guild_message"
+    | "automated_trigger_source"
+    | null;
   status: OwnerNotificationStatus;
   safe_error_category: string | null;
   created_at: string;
@@ -1217,6 +1227,18 @@ export class D1DcChatbotRepository {
     return mapModelSettings(row, nowIsoUtc);
   }
 
+  async hasModelSettings(): Promise<boolean> {
+    const row = await this.db
+      .prepare(
+        `SELECT settings_id
+         FROM model_settings
+         WHERE settings_id = 'singleton'
+         LIMIT 1`,
+      )
+      .first<{ settings_id: string }>();
+    return row !== null;
+  }
+
   private async readProviderSettings(): Promise<ProviderSettingsRow | null> {
     return this.db
       .prepare(
@@ -1729,7 +1751,12 @@ export class D1DcChatbotRepository {
     notificationOwnerDiscordUserId: string;
     candidateDiscordUserId: string | null;
     requestId: string | null;
-    triggerKind: "dm" | "guild_mention" | "automated_trigger_source" | null;
+    triggerKind:
+      | "dm"
+      | "guild_mention"
+      | "guild_message"
+      | "automated_trigger_source"
+      | null;
     status: OwnerNotificationStatus;
     safeErrorCategory: OwnerNotificationDeliverySafeErrorCategory | null;
     createdAt: string;

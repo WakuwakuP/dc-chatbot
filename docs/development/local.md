@@ -25,12 +25,14 @@ Host process:
 pnpm dev
 ```
 
+The host launcher uses a small terminal UI. Press `q` or `Ctrl+C` in that terminal to stop all child services together.
+
 - API: <http://localhost:8787/health>
 - Web: <http://localhost:5173>
 
 The API container runs `wrangler dev --local` with a local D1 database (`dc-chatbot-local`). On startup it applies forward-only migrations from `packages/data/migrations` and seeds a development Owner row that matches the default Web dev auth headers.
 
-The API container enables the local-only auth bypass with `DC_CHATBOT_ENV=development`, `ALLOW_LOCAL_AUTH_BYPASS=true`, and `LOCAL_AUTH_BYPASS_SECRET`. Compose provides a safe local default via `${LOCAL_AUTH_BYPASS_SECRET:-local-auth-bypass-secret}`. The root `pnpm dev` launcher reads root `.env` once and passes those values to API/Web/Bot child processes; set matching `VITE_LOCAL_AUTH_BYPASS_SECRET`, `VITE_DEV_ACCESS_SUBJECT`, and `VITE_DEV_OWNER_DISCORD_USER_ID` there when running on the host. Local callers using the bypass must send an `x-dev-auth-secret` header with the same value. Production deployments use `apps/api/wrangler.toml`, which keeps `ALLOW_LOCAL_AUTH_BYPASS=false`; production also disables/refuses the bypass even if local-only settings are supplied accidentally.
+The API container enables the local-only auth bypass with `DC_CHATBOT_ENV=development`, `ALLOW_LOCAL_AUTH_BYPASS=true`, and `LOCAL_AUTH_BYPASS_SECRET`. Compose provides a safe local default via `${LOCAL_AUTH_BYPASS_SECRET:-local-auth-bypass-secret}`. The root `pnpm dev` launcher reads root `.env` once and syncs local API values such as `LOCAL_AUTH_BYPASS_SECRET`, `LLM_PROVIDER`, and NVIDIA NIM provider settings into `apps/api/.dev.vars` for `wrangler dev`; it also passes `.env` values to Web/Bot child processes. Set matching `VITE_LOCAL_AUTH_BYPASS_SECRET`, `VITE_DEV_ACCESS_SUBJECT`, and `VITE_DEV_OWNER_DISCORD_USER_ID` there when running on the host. Local callers using the bypass must send an `x-dev-auth-secret` header with the same value. Production deployments use `apps/api/wrangler.toml`, which keeps `ALLOW_LOCAL_AUTH_BYPASS=false`; production also disables/refuses the bypass even if local-only settings are supplied accidentally.
 
 ### Local D1
 
@@ -43,6 +45,8 @@ cp apps/api/.dev.vars.example apps/api/.dev.vars
 pnpm --filter @dc-chatbot/api dev:prepare
 pnpm --filter @dc-chatbot/api dev
 ```
+
+When running `pnpm --filter @dc-chatbot/api dev` directly, put local API provider settings in `apps/api/.dev.vars`. The root `pnpm dev` launcher does this sync from root `.env` automatically.
 
 If you change `VITE_DEV_ACCESS_SUBJECT` or `VITE_DEV_OWNER_DISCORD_USER_ID` for the Web UI, update the matching row in `owner_discord_users` or edit `apps/api/scripts/seed-local-d1.sql` and rerun `pnpm --filter @dc-chatbot/api d1:seed:local`.
 

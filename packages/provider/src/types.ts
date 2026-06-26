@@ -2,6 +2,7 @@ import type {
   AttachmentMetadataInput,
   ConfiguredProviderAccessStatus,
   ConversationContextMessageInput,
+  FinalResponseDecision,
   ProviderKind,
   SafeProviderErrorCategory as SharedSafeProviderErrorCategory,
   TriggerKind,
@@ -32,6 +33,21 @@ export type ProviderGenerateResponse = {
   model: string;
 };
 
+export type ProviderResponseDecisionRequest = {
+  requestId: string;
+  model: string;
+  triggerKind: TriggerKind;
+  triggerMessageId: string;
+  selectedContextMessageIds: readonly string[];
+  conversationContextMessages: readonly ConversationContextMessageInput[];
+};
+
+export type ProviderResponseDecisionResponse = {
+  providerCallId: string;
+  model: string;
+  decision: FinalResponseDecision;
+};
+
 export interface LLMProvider {
   readonly providerKind: ProviderKind;
 
@@ -40,4 +56,8 @@ export interface LLMProvider {
   generateResponse(
     request: ProviderGenerateRequest,
   ): Promise<ProviderGenerateResponse>;
+
+  decideResponse(
+    request: ProviderResponseDecisionRequest,
+  ): Promise<ProviderResponseDecisionResponse>;
 }

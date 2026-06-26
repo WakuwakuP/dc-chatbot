@@ -204,7 +204,12 @@ export const ownerNotifications = sqliteTable(
     candidateDiscordUserId: text("candidate_discord_user_id"),
     requestId: text("request_id"),
     triggerKind: text("trigger_kind", {
-      enum: ["dm", "guild_mention", "automated_trigger_source"],
+      enum: [
+        "dm",
+        "guild_mention",
+        "guild_message",
+        "automated_trigger_source",
+      ],
     }),
     status: text("status", {
       enum: [

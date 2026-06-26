@@ -12,6 +12,13 @@ const env: Env = {
   CF_ACCESS_CLIENT_SECRET: "client-secret",
 };
 
+const NIM_MODEL_SETTINGS = {
+  context_selection_model: "nvidia/nemotron-3-ultra-550b-a55b",
+  response_decision_model: "nvidia/nemotron-3-ultra-550b-a55b",
+  response_generation_model: "nvidia/nemotron-3-ultra-550b-a55b",
+  updated_at: "2026-06-20T00:00:00.000Z",
+} as const;
+
 async function readJson(response: Response): Promise<unknown> {
   return response.json();
 }
@@ -121,6 +128,22 @@ class FakeD1Statement {
     }
 
     if (
+      this.sql.includes("SELECT settings_id") &&
+      this.sql.includes("FROM model_settings")
+    ) {
+      return this.db.modelSettingsRow
+        ? ({ settings_id: "singleton" } as T)
+        : null;
+    }
+
+    if (
+      this.sql.includes("FROM model_settings") &&
+      this.sql.includes("context_selection_model")
+    ) {
+      return this.db.modelSettingsRow as T | null;
+    }
+
+    if (
       this.sql.includes("FROM owner_discord_users") &&
       this.sql.includes("role = 'admin_owner'")
     ) {
@@ -213,7 +236,12 @@ type FakeOwnerNotificationRow = {
   notification_owner_discord_user_id: string;
   candidate_discord_user_id: string | null;
   request_id: string | null;
-  trigger_kind: "dm" | "guild_mention" | "automated_trigger_source" | null;
+  trigger_kind:
+    | "dm"
+    | "guild_mention"
+    | "guild_message"
+    | "automated_trigger_source"
+    | null;
   status:
     | "pending_delivery"
     | "delivery_requested"
@@ -230,18 +258,21 @@ class FakeD1Database {
   readonly allowedOwnerDiscordUserIds: Set<string>;
   readonly activeAutomatedSourceDiscordUserIds: Set<string>;
   readonly pendingOwnerNotifications: FakeOwnerNotificationRow[];
+  readonly modelSettingsRow: typeof NIM_MODEL_SETTINGS | null;
   failRunSqlFragment: string | null = null;
 
   constructor(
     allowedOwnerDiscordUserIds: readonly string[] = [],
     pendingOwnerNotifications: FakeOwnerNotificationRow[] = [],
     activeAutomatedSourceDiscordUserIds: readonly string[] = [],
+    modelSettingsRow: typeof NIM_MODEL_SETTINGS | null = null,
   ) {
     this.allowedOwnerDiscordUserIds = new Set(allowedOwnerDiscordUserIds);
     this.activeAutomatedSourceDiscordUserIds = new Set(
       activeAutomatedSourceDiscordUserIds,
     );
     this.pendingOwnerNotifications = pendingOwnerNotifications;
+    this.modelSettingsRow = modelSettingsRow;
   }
 
   prepare(sql: string): FakeD1Statement {
@@ -692,6 +723,45 @@ describe("API Worker routes", () => {
     });
   });
 
+  it("accepts allowed guild channel messages without a bot mention", async () => {
+    const db = new FakeD1Database(["300"]);
+    const response = await worker.fetch(
+      new Request("https://api.test/api/v1/bot/messages/intake", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-dev-auth-secret": LOCAL_AUTH_BYPASS_SECRET,
+          "x-dev-bot-service": "true",
+        },
+        body: JSON.stringify({
+          requestId: "01HY0000000000000000000000",
+          messageId: "100",
+          channelId: "200",
+          guildId: "900",
+          authorDiscordUserId: "300",
+          triggerKind: "guild_message",
+          isAllowedUser: true,
+          isAutomatedSource: false,
+          attachmentCount: 0,
+          observedAt: "2026-06-20T00:00:00.000Z",
+        }),
+      }),
+      { ...env, DB: db as unknown as D1Database },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await readJson(response)).toMatchObject({
+      action: "fetch_context",
+      reason: "allowed_guild_message",
+      contextMessageLimit: 20,
+      contextFetchPlan: {
+        kind: "guild_recent",
+        limit: 20,
+        includeTriggerMessage: true,
+      },
+    });
+  });
+
   it("returns 503 for bot respond without DB outside local dev bypass", async () => {
     const response = await worker.fetch(
       new Request("https://api.test/api/v1/bot/messages/respond", {
@@ -835,7 +905,7 @@ describe("API Worker routes", () => {
       "01HY0000000000000000000000",
       "fake",
       "local",
-      "fake-model",
+      "fake-response-generation",
       "response_generation",
       "completed",
       null,
@@ -890,7 +960,7 @@ describe("API Worker routes", () => {
   });
 
   it("passes safe attachment metadata transiently for allowed non-automated responses", async () => {
-    const db = new FakeD1Database(["300"]);
+    const db = new FakeD1Database(["300"], [], [], NIM_MODEL_SETTINGS);
     const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as {
         messages: { content: string }[];
@@ -947,7 +1017,7 @@ describe("API Worker routes", () => {
   });
 
   it("drops attachment metadata before provider calls for Automated Trigger Sources", async () => {
-    const db = new FakeD1Database([], [], ["300"]);
+    const db = new FakeD1Database([], [], ["300"], NIM_MODEL_SETTINGS);
     const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body));
       expect(JSON.stringify(body)).not.toContain("Attachment metadata only");
@@ -1056,8 +1126,266 @@ describe("API Worker routes", () => {
     ).toHaveLength(0);
   });
 
-  it("maps missing NVIDIA NIM API Key configuration to safe metadata", async () => {
+  it("uses the Response Decision model for ambiguous guild mentions before generation", async () => {
+    const db = new FakeD1Database(["300"], [], [], NIM_MODEL_SETTINGS);
+    const transientContextText = "mention that should not be answered";
+    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as {
+        model: string;
+        messages: { content: string }[];
+      };
+      expect(body.model).toBe(NIM_MODEL_SETTINGS.response_decision_model);
+      expect(JSON.stringify(body)).toContain("shouldRespond");
+      expect(JSON.stringify(body)).toContain(transientContextText);
+      return new Response(
+        JSON.stringify({
+          model: NIM_MODEL_SETTINGS.response_decision_model,
+          choices: [{ message: { content: '{"shouldRespond":false}' } }],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await worker.fetch(
+      new Request("https://api.test/api/v1/bot/messages/respond", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-dev-auth-secret": LOCAL_AUTH_BYPASS_SECRET,
+          "x-dev-bot-service": "true",
+        },
+        body: JSON.stringify({
+          requestId: "01HY0000000000000000000000",
+          triggerMessageId: "100",
+          triggerAuthorDiscordUserId: "300",
+          triggerKind: "guild_mention",
+          model: "meta/llama-3.1-70b-instruct",
+          conversationContextMessageIds: ["100"],
+          conversationContextMessages: [
+            {
+              messageId: "100",
+              authorRelation: "trigger_user",
+              content: transientContextText,
+            },
+          ],
+        }),
+      }),
+      {
+        ...env,
+        DB: db as unknown as D1Database,
+        LLM_PROVIDER: "nvidia_nim",
+        NVIDIA_NIM_BEARER_TOKEN: "1",
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await readJson(response)).toMatchObject({
+      requestId: "01HY0000000000000000000000",
+      decision: {
+        shouldRespond: false,
+        reason: "trigger_message_not_selected",
+      },
+      replyChunks: [],
+      providerCallId: null,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const providerAudit = dbCallsContaining(
+      db,
+      "INSERT INTO provider_call_audit_metadata",
+    );
+    expect(providerAudit.map((call) => call.bindings[5])).toEqual([
+      "context_selection",
+      "response_decision",
+    ]);
+    expect(
+      providerAudit.some((call) => call.bindings[5] === "response_generation"),
+    ).toBe(false);
+    expectNoDbBindingString(db, [transientContextText]);
+  });
+
+  it("returns a decision-only response without starting response generation", async () => {
+    const db = new FakeD1Database(["300"], [], [], NIM_MODEL_SETTINGS);
+    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { model: string };
+      expect(body.model).toBe(NIM_MODEL_SETTINGS.response_decision_model);
+      return new Response(
+        JSON.stringify({
+          model: NIM_MODEL_SETTINGS.response_decision_model,
+          choices: [{ message: { content: '{"shouldRespond":true}' } }],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await worker.fetch(
+      new Request("https://api.test/api/v1/bot/messages/respond", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-dev-auth-secret": LOCAL_AUTH_BYPASS_SECRET,
+          "x-dev-bot-service": "true",
+        },
+        body: JSON.stringify({
+          requestId: "01HY0000000000000000000000",
+          triggerMessageId: "100",
+          triggerAuthorDiscordUserId: "300",
+          triggerKind: "guild_message",
+          respondMode: "decision_only",
+          model: "meta/llama-3.1-70b-instruct",
+          conversationContextMessageIds: ["100"],
+          conversationContextMessages: [
+            {
+              messageId: "100",
+              authorRelation: "trigger_user",
+              content: "should answer this",
+            },
+          ],
+        }),
+      }),
+      {
+        ...env,
+        DB: db as unknown as D1Database,
+        LLM_PROVIDER: "nvidia_nim",
+        NVIDIA_NIM_BEARER_TOKEN: "1",
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await readJson(response)).toMatchObject({
+      decision: {
+        shouldRespond: true,
+        reason: "selected_context_available",
+      },
+      replyChunks: [],
+      providerCallId: null,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(
+      dbCallsContaining(db, "INSERT INTO provider_call_audit_metadata").some(
+        (call) => call.bindings[5] === "response_generation",
+      ),
+    ).toBe(false);
+  });
+
+  it("skips the Response Decision provider call in generate-only mode", async () => {
+    const db = new FakeD1Database(["300"], [], [], NIM_MODEL_SETTINGS);
+    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as {
+        model: string;
+        messages: { content: string }[];
+      };
+      expect(body.model).toBe(NIM_MODEL_SETTINGS.response_generation_model);
+      expect(JSON.stringify(body)).not.toContain("shouldRespond");
+      return new Response(
+        JSON.stringify({
+          model: NIM_MODEL_SETTINGS.response_generation_model,
+          choices: [{ message: { content: "ok" } }],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await worker.fetch(
+      new Request("https://api.test/api/v1/bot/messages/respond", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-dev-auth-secret": LOCAL_AUTH_BYPASS_SECRET,
+          "x-dev-bot-service": "true",
+        },
+        body: JSON.stringify({
+          requestId: "01HY0000000000000000000000",
+          triggerMessageId: "100",
+          triggerAuthorDiscordUserId: "300",
+          triggerKind: "guild_message",
+          respondMode: "generate_only",
+          model: "meta/llama-3.1-70b-instruct",
+          conversationContextMessageIds: ["100"],
+          conversationContextMessages: [
+            {
+              messageId: "100",
+              authorRelation: "trigger_user",
+              content: "generate this",
+            },
+          ],
+        }),
+      }),
+      {
+        ...env,
+        DB: db as unknown as D1Database,
+        LLM_PROVIDER: "nvidia_nim",
+        NVIDIA_NIM_BEARER_TOKEN: "1",
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await readJson(response)).toMatchObject({
+      decision: {
+        shouldRespond: true,
+        reason: "selected_context_available",
+      },
+      replyChunks: ["ok"],
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(
+      dbCallsContaining(db, "INSERT INTO provider_call_audit_metadata").some(
+        (call) => call.bindings[5] === "response_decision",
+      ),
+    ).toBe(false);
+  });
+
+  it("requires configured model settings before NVIDIA NIM provider calls", async () => {
     const db = new FakeD1Database(["300"]);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await worker.fetch(
+      new Request("https://api.test/api/v1/bot/messages/respond", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-dev-auth-secret": LOCAL_AUTH_BYPASS_SECRET,
+          "x-dev-bot-service": "true",
+        },
+        body: JSON.stringify({
+          requestId: "01HY0000000000000000000000",
+          triggerMessageId: "100",
+          triggerAuthorDiscordUserId: "300",
+          triggerKind: "dm",
+          model: "fake-model",
+          conversationContextMessageIds: [],
+        }),
+      }),
+      {
+        ...env,
+        DB: db as unknown as D1Database,
+        LLM_PROVIDER: "nvidia_nim",
+        NVIDIA_NIM_BEARER_TOKEN: "1",
+      },
+    );
+
+    expect(response.status).toBe(503);
+    expect(await readJson(response)).toMatchObject({
+      code: "model_settings_not_configured",
+      requestId: "01HY0000000000000000000000",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(
+      dbCallsContaining(db, "INSERT INTO provider_call_audit_metadata").some(
+        (call) => call.bindings[5] === "response_generation",
+      ),
+    ).toBe(false);
+    expect(
+      dbCallsContaining(db, "INSERT INTO request_audit_metadata").at(-1)
+        ?.bindings,
+    ).toContain("model_settings_not_configured");
+  });
+
+  it("maps missing NVIDIA NIM API Key configuration to safe metadata", async () => {
+    const db = new FakeD1Database(["300"], [], [], NIM_MODEL_SETTINGS);
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1110,7 +1438,7 @@ describe("API Worker routes", () => {
       "01HY0000000000000000000000",
       "nvidia_nim",
       "deployment",
-      "meta/llama-3.1-70b-instruct",
+      "nvidia/nemotron-3-ultra-550b-a55b",
       "response_generation",
       "failed",
       "not_configured",
@@ -1118,7 +1446,7 @@ describe("API Worker routes", () => {
   });
 
   it("maps invalid NVIDIA NIM provider access to safe audit metadata", async () => {
-    const db = new FakeD1Database(["300"]);
+    const db = new FakeD1Database(["300"], [], [], NIM_MODEL_SETTINGS);
     const tokenPlaceholder = "1";
     vi.stubGlobal(
       "fetch",
@@ -1174,7 +1502,7 @@ describe("API Worker routes", () => {
       "01HY0000000000000000000000",
       "nvidia_nim",
       "deployment",
-      "meta/llama-3.1-70b-instruct",
+      "nvidia/nemotron-3-ultra-550b-a55b",
       "response_generation",
       "failed",
       "authentication_failed",

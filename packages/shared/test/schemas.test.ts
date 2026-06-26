@@ -84,6 +84,23 @@ describe("BotMessageIntakeRequestSchema", () => {
     expect(parsed.triggerKind).toBe("dm");
     expect("messageContent" in parsed).toBe(false);
   });
+
+  it("accepts guild channel messages without a bot mention as Response Triggers", () => {
+    const parsed = parseJson(BotMessageIntakeRequestSchema, {
+      requestId: "01HY0000000000000000000000",
+      messageId: "123",
+      channelId: "456",
+      guildId: "999",
+      authorDiscordUserId: "789",
+      triggerKind: "guild_message",
+      isAllowedUser: true,
+      isAutomatedSource: false,
+      attachmentCount: 0,
+      observedAt: "2026-06-20T00:00:00.000Z",
+    });
+
+    expect(parsed.triggerKind).toBe("guild_message");
+  });
 });
 
 describe("BotRespondRequestSchema", () => {
@@ -93,6 +110,7 @@ describe("BotRespondRequestSchema", () => {
       triggerMessageId: "123",
       triggerAuthorDiscordUserId: "789",
       triggerKind: "dm",
+      respondMode: "decision_only",
       model: "fake-model",
       conversationContextMessageIds: [],
       attachmentMetadata: [
@@ -106,6 +124,7 @@ describe("BotRespondRequestSchema", () => {
     });
 
     expect(parsed.attachmentMetadata?.[0]?.kind).toBe("text");
+    expect(parsed.respondMode).toBe("decision_only");
     expect(JSON.stringify(parsed)).not.toContain("attachmentUrl");
     expect(JSON.stringify(parsed)).not.toContain("filename");
     expect(JSON.stringify(parsed)).not.toContain("attachmentBytes");

@@ -96,7 +96,7 @@ Bot Worker は Discord Gateway に接続する長寿命 Node.js process です�
 主な責務:
 
 - Discord Gateway 接続
-- DM / guild mention / automated source のイベント受信
+- DM / guild channel message / automated source のイベント受信
 - Discord Message Content Intent を使った trigger message の取得
 - `/api/v1/bot/messages/intake` への送信
 - API から返された context fetch plan に基づく recent Discord messages の一時取得

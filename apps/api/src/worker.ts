@@ -11,6 +11,7 @@ import {
   createLLMProvider,
   type CreateLLMProviderOptions,
   type ProviderGenerateResponse,
+  type ProviderResponseDecisionResponse,
 } from "@dc-chatbot/provider";
 import {
   BotMessageIntakeRequestSchema,
@@ -583,7 +584,11 @@ async function handleOwnerMe(request: Request, env: Env): Promise<Response> {
 }
 
 function buildContextFetchPlan(
-  triggerKind: "dm" | "guild_mention" | "automated_trigger_source",
+  triggerKind:
+    | "dm"
+    | "guild_mention"
+    | "guild_message"
+    | "automated_trigger_source",
 ): ContextFetchPlan {
   if (triggerKind === "dm") {
     return { kind: "dm_recent", limit: 30, includeTriggerMessage: true };
@@ -604,7 +609,11 @@ function fallbackIntakeDecision(intake: {
   requestId: string;
   isAllowedUser: boolean;
   isAutomatedSource: boolean;
-  triggerKind: "dm" | "guild_mention" | "automated_trigger_source";
+  triggerKind:
+    | "dm"
+    | "guild_mention"
+    | "guild_message"
+    | "automated_trigger_source";
 }): BotMessageIntakeResponse {
   if (intake.isAllowedUser) {
     return {
@@ -614,7 +623,11 @@ function fallbackIntakeDecision(intake: {
           ? "respond_without_context"
           : "fetch_context",
       reason:
-        intake.triggerKind === "dm" ? "allowed_dm" : "allowed_guild_mention",
+        intake.triggerKind === "dm"
+          ? "allowed_dm"
+          : intake.triggerKind === "guild_message"
+            ? "allowed_guild_message"
+            : "allowed_guild_mention",
       contextMessageLimit: intake.triggerKind === "dm" ? 0 : 20,
       contextFetchPlan:
         intake.triggerKind === "dm"
@@ -633,13 +646,20 @@ function fallbackIntakeDecision(intake: {
 }
 
 function allowedReason(
-  triggerKind: "dm" | "guild_mention" | "automated_trigger_source",
+  triggerKind:
+    | "dm"
+    | "guild_mention"
+    | "guild_message"
+    | "automated_trigger_source",
 ): BotMessageIntakeResponse["reason"] {
   if (triggerKind === "dm") {
     return "allowed_dm";
   }
   if (triggerKind === "automated_trigger_source") {
     return "allowed_automated_source";
+  }
+  if (triggerKind === "guild_message") {
+    return "allowed_guild_message";
   }
   return "allowed_guild_mention";
 }
@@ -693,6 +713,37 @@ async function recordDeterministicProviderStageAudit(
   });
 }
 
+async function modelSettingsNotConfiguredResponse(input: {
+  repository: D1DcChatbotRepository;
+  providerIdentity: ActiveProviderIdentity;
+  requestId: string;
+}): Promise<Response> {
+  const failedAt = new Date().toISOString();
+  await Promise.all([
+    input.repository.upsertProviderConfigMetadata({
+      providerKind: input.providerIdentity.providerKind,
+      configuredProviderAccessStatus: "not_configured",
+      checkedAt: failedAt,
+      safeErrorCategory: "not_configured",
+      nowIsoUtc: failedAt,
+    }),
+    recordAudit(input.repository, {
+      actorType: "bot_service",
+      requestId: input.requestId,
+      eventType: "bot.message_respond.model_settings_not_configured",
+      status: "failed",
+      nowIsoUtc: failedAt,
+      errorCategory: "model_settings_not_configured",
+    }),
+  ]);
+  return problemResponse(
+    503,
+    "model_settings_not_configured",
+    "Model settings are not configured",
+    input.requestId,
+  );
+}
+
 type ContextSelectionStageResult = {
   selectedContextMessageIds: readonly string[];
   selectedConversationContextMessages?: readonly ConversationContextMessageInput[];
@@ -740,6 +791,22 @@ function runDeterministicResponseDecision(input: {
     return { shouldRespond: false, reason: "trigger_message_not_selected" };
   }
   return { shouldRespond: true, reason: "selected_context_available" };
+}
+
+function shouldUseProviderResponseDecision(input: {
+  triggerKind: BotRespondRequest["triggerKind"];
+  deterministicDecision: FinalResponseDecision;
+  selectedConversationContextMessages:
+    | readonly ConversationContextMessageInput[]
+    | undefined;
+}): boolean {
+  return (
+    (input.triggerKind === "guild_mention" ||
+      input.triggerKind === "guild_message") &&
+    input.deterministicDecision.shouldRespond &&
+    input.selectedConversationContextMessages !== undefined &&
+    input.selectedConversationContextMessages.length > 0
+  );
 }
 
 function uniqueStrings(values: readonly string[]): string[] {
@@ -965,6 +1032,7 @@ async function handleBotRespond(request: Request, env: Env): Promise<Response> {
   const startedAt = Date.now();
   const nowIsoUtc = new Date(startedAt).toISOString();
   const providerIdentity = activeProviderIdentity(env);
+  const respondMode = respondRequest.respondMode ?? "decide_and_generate";
 
   if (repository) {
     if (respondRequest.triggerKind === "automated_trigger_source") {
@@ -1030,7 +1098,7 @@ async function handleBotRespond(request: Request, env: Env): Promise<Response> {
             respondRequest.conversationContextMessages,
         }
       : runDeterministicContextSelection(respondRequest);
-  const finalDecision =
+  const deterministicDecision =
     respondRequest.triggerKind === "automated_trigger_source"
       ? ({
           shouldRespond: true,
@@ -1041,21 +1109,123 @@ async function handleBotRespond(request: Request, env: Env): Promise<Response> {
           triggerMessageId: respondRequest.triggerMessageId,
           selectedContextMessageIds: contextSelection.selectedContextMessageIds,
         });
-  if (repository && respondRequest.triggerKind !== "automated_trigger_source") {
-    const providerConfig =
-      await repository.getProviderConfigMetadata(nowIsoUtc);
+  let finalDecision: FinalResponseDecision = deterministicDecision;
+  const providerConfig = repository
+    ? await repository.getProviderConfigMetadata(nowIsoUtc)
+    : null;
+  const contextSelectionModel =
+    providerConfig?.modelSettings.contextSelectionModel ?? respondRequest.model;
+  const responseDecisionModel =
+    providerConfig?.modelSettings.responseDecisionModel ?? respondRequest.model;
+  const responseGenerationModel =
+    providerConfig?.modelSettings.responseGenerationModel ??
+    respondRequest.model;
+  if (
+    repository &&
+    respondRequest.triggerKind !== "automated_trigger_source" &&
+    respondMode !== "generate_only"
+  ) {
     await recordDeterministicProviderStageAudit(repository, providerIdentity, {
       requestId: respondRequest.requestId,
       providerCallStage: "context_selection",
-      model: providerConfig.modelSettings.contextSelectionModel,
+      model: contextSelectionModel,
       nowIsoUtc,
     });
-    await recordDeterministicProviderStageAudit(repository, providerIdentity, {
-      requestId: respondRequest.requestId,
-      providerCallStage: "response_decision",
-      model: providerConfig.modelSettings.responseDecisionModel,
-      nowIsoUtc,
-    });
+    if (
+      shouldUseProviderResponseDecision({
+        triggerKind: respondRequest.triggerKind,
+        deterministicDecision,
+        selectedConversationContextMessages:
+          contextSelection.selectedConversationContextMessages,
+      })
+    ) {
+      let providerDecisionResponse: ProviderResponseDecisionResponse | null =
+        null;
+      if (
+        providerIdentity.providerKind === "nvidia_nim" &&
+        !(await repository.hasModelSettings())
+      ) {
+        return modelSettingsNotConfiguredResponse({
+          repository,
+          providerIdentity,
+          requestId: respondRequest.requestId,
+        });
+      }
+      try {
+        const provider = createLLMProvider(createLLMProviderOptions(env));
+        providerDecisionResponse = await provider.decideResponse({
+          requestId: respondRequest.requestId,
+          model: responseDecisionModel,
+          triggerKind: respondRequest.triggerKind,
+          triggerMessageId: respondRequest.triggerMessageId,
+          selectedContextMessageIds: contextSelection.selectedContextMessageIds,
+          conversationContextMessages:
+            contextSelection.selectedConversationContextMessages ?? [],
+        });
+        finalDecision = providerDecisionResponse.decision;
+      } catch (error) {
+        const safeErrorCategory = safeProviderErrorCategory(error);
+        if (error instanceof ProviderError) {
+          console.info("dc-chatbot provider request failed", {
+            eventType: "provider_request_failed",
+            providerKind: providerIdentity.providerKind,
+            providerCallStage: "response_decision",
+            safeErrorCategory,
+            safeDiagnosticCode: error.safeDiagnosticCode,
+          });
+        }
+        const failedAt = new Date().toISOString();
+        await Promise.all([
+          repository.insertProviderCallAudit({
+            ...providerIdentity,
+            providerCallId: createUlid(),
+            requestId: respondRequest.requestId,
+            model: responseDecisionModel,
+            providerCallStage: "response_decision",
+            status: "failed",
+            safeErrorCategory,
+            durationMs: Date.now() - startedAt,
+            createdAt: failedAt,
+            retainUntil: addDaysIso(failedAt, 365),
+          }),
+          recordAudit(repository, {
+            actorType: "bot_service",
+            requestId: respondRequest.requestId,
+            eventType: "bot.message_respond.response_decision_provider_failed",
+            status: "failed",
+            nowIsoUtc: failedAt,
+            errorCategory: safeErrorCategory,
+          }),
+        ]);
+        finalDecision = deterministicDecision;
+      }
+      if (providerDecisionResponse) {
+        const decidedAt = new Date().toISOString();
+        await repository.insertProviderCallAudit({
+          ...providerIdentity,
+          providerCallId: providerDecisionResponse.providerCallId,
+          requestId: respondRequest.requestId,
+          model: providerDecisionResponse.model,
+          providerCallStage: "response_decision",
+          status: "completed",
+          safeErrorCategory: null,
+          durationMs: Date.now() - startedAt,
+          createdAt: decidedAt,
+          retainUntil: addDaysIso(decidedAt, 365),
+        });
+      }
+    } else {
+      await recordDeterministicProviderStageAudit(
+        repository,
+        providerIdentity,
+        {
+          requestId: respondRequest.requestId,
+          providerCallStage: "response_decision",
+          model: responseDecisionModel,
+          nowIsoUtc,
+        },
+      );
+    }
     if (!finalDecision.shouldRespond) {
       const finishedAt = new Date().toISOString();
       await Promise.all([
@@ -1090,8 +1260,28 @@ async function handleBotRespond(request: Request, env: Env): Promise<Response> {
       providerCallId: null,
     } satisfies BotRespondResponse);
   }
+  if (respondMode === "decision_only") {
+    return jsonResponse({
+      requestId: respondRequest.requestId,
+      decision: finalDecision,
+      replyChunks: [],
+      providerCallId: null,
+    } satisfies BotRespondResponse);
+  }
 
   const configuredAccess = configuredProviderAccessStatus(env);
+  if (
+    repository &&
+    providerIdentity.providerKind === "nvidia_nim" &&
+    !(await repository.hasModelSettings())
+  ) {
+    return modelSettingsNotConfiguredResponse({
+      repository,
+      providerIdentity,
+      requestId: respondRequest.requestId,
+    });
+  }
+
   if (repository) {
     await repository.upsertProviderConfigMetadata({
       providerKind: providerIdentity.providerKind,
@@ -1112,7 +1302,7 @@ async function handleBotRespond(request: Request, env: Env): Promise<Response> {
           ...providerIdentity,
           providerCallId: createUlid(),
           requestId: respondRequest.requestId,
-          model: respondRequest.model,
+          model: responseGenerationModel,
           providerCallStage: "response_generation",
           status: "failed",
           safeErrorCategory,
@@ -1148,7 +1338,7 @@ async function handleBotRespond(request: Request, env: Env): Promise<Response> {
   const providerRequest = contextSelection.selectedConversationContextMessages
     ? {
         requestId: respondRequest.requestId,
-        model: respondRequest.model,
+        model: responseGenerationModel,
         triggerKind: respondRequest.triggerKind,
         conversationContextMessageIds:
           contextSelection.selectedContextMessageIds,
@@ -1158,7 +1348,7 @@ async function handleBotRespond(request: Request, env: Env): Promise<Response> {
       }
     : {
         requestId: respondRequest.requestId,
-        model: respondRequest.model,
+        model: responseGenerationModel,
         triggerKind: respondRequest.triggerKind,
         conversationContextMessageIds:
           contextSelection.selectedContextMessageIds,
@@ -1170,6 +1360,15 @@ async function handleBotRespond(request: Request, env: Env): Promise<Response> {
     providerResponse = await provider.generateResponse(providerRequest);
   } catch (error) {
     const safeErrorCategory = safeProviderErrorCategory(error);
+    if (error instanceof ProviderError) {
+      console.info("dc-chatbot provider request failed", {
+        eventType: "provider_request_failed",
+        providerKind: providerIdentity.providerKind,
+        providerCallStage: "response_generation",
+        safeErrorCategory,
+        safeDiagnosticCode: error.safeDiagnosticCode,
+      });
+    }
     const failedAt = new Date().toISOString();
     if (repository) {
       await Promise.all([
@@ -1185,7 +1384,7 @@ async function handleBotRespond(request: Request, env: Env): Promise<Response> {
           ...providerIdentity,
           providerCallId: createUlid(),
           requestId: respondRequest.requestId,
-          model: respondRequest.model,
+          model: responseGenerationModel,
           providerCallStage: "response_generation",
           status: "failed",
           safeErrorCategory,

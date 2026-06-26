@@ -33,12 +33,12 @@
 
 ### Discord message handling
 
-- Allowed Discord User の DM と guild mention を Response Trigger とします。
+- Allowed Discord User の DM と guild channel message を Response Trigger とします。guild mention は明示 mention 付きの互換 trigger として残します。
 - non-allowed user には返信せず、Candidate Discord User として記録・更新します。
 - Conversation Context は Discord から必要時に取得し、長期保存しません。
 - Automated Discord bot / webhook はデフォルト無視し、明示許可された Automated Trigger Source だけ制限付きで扱います。
 
-関連 ADR: 0007, 0008, 0013, 0014, 0015, 0019, 0020, 0021, 0028, 0029, 0030, 0031, 0045, 0046, 0047
+関連 ADR: 0007, 0008, 0013, 0014, 0015, 0019, 0020, 0021, 0028, 0029, 0030, 0031, 0045, 0046, 0047, 0060
 
 ### Owner / Registered Member / provider access
 
@@ -146,6 +146,7 @@
 | [0057](0057-use-vite-react-router-tailwind-shadcn-for-web-frontend.md)       | Use Vite, React, React Router, Tailwind CSS, and shadcn/ui for the web frontend |
 | [0058](0058-support-nvidia-nim-llm-provider.md)                              | Support NVIDIA NIM as an LLM provider (superseded by ADR 0059)                  |
 | [0059](0059-use-nvidia-nim-api-key-as-provider-credential.md)                | Use NVIDIA NIM API key as provider credential                                   |
+| [0060](0060-allow-guild-message-response-triggers.md)                        | Allow guild message Response Triggers without mention                           |
 
 ## 新しい ADR を追加するとき
 

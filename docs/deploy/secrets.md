@@ -27,6 +27,7 @@ Do not store `DISCORD_TOKEN` in GitHub Actions for the normal VPS pull-and-start
 | `API_WORKER_NAME`               | API deploy              | Optional Worker name override. Defaults to `dc-chatbot-api` when unset.                                                                       |
 | `CF_ACCESS_TEAM_DOMAIN`         | API deploy/API Worker   | Cloudflare Access team domain for Owner route JWT JWKS lookup, for example `team.cloudflareaccess.com`.                                       |
 | `CF_ACCESS_AUD`                 | API deploy/API Worker   | Cloudflare Access application audience tag required in `Cf-Access-Jwt-Assertion` for `/api/v1/owner/*` routes.                                |
+| `CF_BOT_ACCESS_AUD`             | API deploy/API Worker   | Cloudflare Access application audience tag required for `/api/v1/bot/*` Service Token JWT verification.                                       |
 | `CLOUDFLARE_D1_DATABASE_NAME`   | D1 migration/API deploy | Production D1 database name.                                                                                                                  |
 | `CLOUDFLARE_D1_DATABASE_ID`     | API deploy              | Production D1 database ID patched into `apps/api/wrangler.toml` during deployment.                                                            |
 | `CLOUDFLARE_PAGES_PROJECT_NAME` | Web deploy              | Cloudflare Pages project name for `apps/web`.                                                                                                 |
@@ -49,7 +50,8 @@ Owner human routes under `/api/v1/owner/*` require a verified Cloudflare Access 
 Configure these GitHub Actions variables before production deploy:
 
 - `CF_ACCESS_TEAM_DOMAIN`: the Access team domain used to fetch JWKS from `https://<team-domain>/cdn-cgi/access/certs`. Use the host name such as `team.cloudflareaccess.com`; an `https://` URL with no path is also accepted by the Worker.
-- `CF_ACCESS_AUD`: the Cloudflare Access application audience tag that must be present in the JWT `aud` claim.
+- `CF_ACCESS_AUD`: the Cloudflare Access application audience tag that must be present in the Owner route JWT `aud` claim.
+- `CF_BOT_ACCESS_AUD`: the Cloudflare Access application audience tag that must be present in the Bot route Service Token JWT `aud` claim.
 
 If either value is missing or invalid, Owner route authentication fails closed with `401 unauthorized`. The forwarded `cf-access-authenticated-user-email` header is not trusted by itself.
 

@@ -12,6 +12,9 @@ ALLOW_LOCAL_AUTH_BYPASS = "false"
 # Set these from GitHub Actions variables during deployment.
 CF_ACCESS_TEAM_DOMAIN = "replace-with-team.cloudflareaccess.com"
 CF_ACCESS_AUD = "replace-with-access-application-aud"
+# Required in production for /api/v1/bot/* Cloudflare Access service authentication.
+# Set this from GitHub Actions variables during deployment.
+CF_BOT_ACCESS_AUD = "replace-with-bot-access-application-aud"
 # Set to "nvidia_nim" to use NVIDIA NIM for LLM generation.
 LLM_PROVIDER = "fake"
 # Configure NVIDIA_NIM_BEARER_TOKEN as a Cloudflare secret, never as a var.

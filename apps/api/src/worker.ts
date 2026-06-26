@@ -53,6 +53,7 @@ export type Env = {
   LOCAL_AUTH_BYPASS_SECRET?: string;
   CF_ACCESS_TEAM_DOMAIN?: string;
   CF_ACCESS_AUD?: string;
+  CF_BOT_ACCESS_AUD?: string;
   CF_ACCESS_CLIENT_ID?: string;
   CF_ACCESS_CLIENT_SECRET?: string;
   OWNER_WEB_ORIGIN?: string;
@@ -388,13 +389,14 @@ async function fetchAccessJwk(
   return jwks.keys.find((key) => isJwkWithKid(key) && key.kid === kid) ?? null;
 }
 
-async function verifyAccessJwt(
+async function verifyAccessJwtPayload(
   token: string,
   env: Env,
-): Promise<string | null> {
+  expectedAudience: string | undefined,
+): Promise<AccessJwtPayload | null> {
   const teamDomain = normalizeAccessTeamDomain(env.CF_ACCESS_TEAM_DOMAIN);
-  const expectedAudience = env.CF_ACCESS_AUD?.trim();
-  if (!teamDomain || !expectedAudience) {
+  const audience = expectedAudience?.trim();
+  if (!teamDomain || !audience) {
     return null;
   }
 
@@ -425,13 +427,8 @@ async function verifyAccessJwt(
 
   if (
     !validateJwtTiming(payload) ||
-    !jwtAudienceContains(payload.aud, expectedAudience)
+    !jwtAudienceContains(payload.aud, audience)
   ) {
-    return null;
-  }
-
-  const subject = extractAccessJwtSubject(payload);
-  if (!subject) {
     return null;
   }
 
@@ -459,10 +456,34 @@ async function verifyAccessJwt(
       signature,
       new TextEncoder().encode(`${encodedHeader}.${encodedPayload}`),
     );
-    return verified ? subject : null;
+    return verified ? payload : null;
   } catch {
     return null;
   }
+}
+
+async function verifyAccessJwt(
+  token: string,
+  env: Env,
+): Promise<string | null> {
+  const payload = await verifyAccessJwtPayload(token, env, env.CF_ACCESS_AUD);
+  if (!payload) {
+    return null;
+  }
+  return extractAccessJwtSubject(payload);
+}
+
+async function verifyBotAccessJwt(
+  request: Request,
+  env: Env,
+): Promise<boolean> {
+  const jwt = request.headers.get("Cf-Access-Jwt-Assertion");
+  if (!jwt) {
+    return false;
+  }
+  return (
+    (await verifyAccessJwtPayload(jwt, env, env.CF_BOT_ACCESS_AUD)) !== null
+  );
 }
 
 async function getAccessSubject(
@@ -552,7 +573,10 @@ async function requireOwnerWithRepository(
   return { ...auth, repository: auth.repository };
 }
 
-function authenticateBotService(request: Request, env: Env): boolean {
+async function authenticateBotService(
+  request: Request,
+  env: Env,
+): Promise<boolean> {
   if (
     hasValidLocalAuthBypass(request, env) &&
     request.headers.get("x-dev-bot-service") === "true"
@@ -562,14 +586,16 @@ function authenticateBotService(request: Request, env: Env): boolean {
 
   const configuredClientId = env.CF_ACCESS_CLIENT_ID;
   const configuredClientSecret = env.CF_ACCESS_CLIENT_SECRET;
-  if (!configuredClientId || !configuredClientSecret) {
-    return false;
-  }
-
-  return (
+  if (
+    configuredClientId &&
+    configuredClientSecret &&
     request.headers.get("cf-access-client-id") === configuredClientId &&
     request.headers.get("cf-access-client-secret") === configuredClientSecret
-  );
+  ) {
+    return true;
+  }
+
+  return verifyBotAccessJwt(request, env);
 }
 
 async function parseRequestJson(request: Request): Promise<unknown> {
@@ -859,7 +885,7 @@ async function handleBotMessageIntake(
   request: Request,
   env: Env,
 ): Promise<Response> {
-  if (!authenticateBotService(request, env)) {
+  if (!(await authenticateBotService(request, env))) {
     return problemResponse(401, "unauthorized", "Unauthorized");
   }
 
@@ -1017,7 +1043,7 @@ async function handleBotMessageIntake(
 }
 
 async function handleBotRespond(request: Request, env: Env): Promise<Response> {
-  if (!authenticateBotService(request, env)) {
+  if (!(await authenticateBotService(request, env))) {
     return problemResponse(401, "unauthorized", "Unauthorized");
   }
 
@@ -1952,7 +1978,7 @@ async function handleClaimPendingOwnerNotifications(
   request: Request,
   env: Env,
 ): Promise<Response> {
-  if (!authenticateBotService(request, env)) {
+  if (!(await authenticateBotService(request, env))) {
     return problemResponse(401, "unauthorized", "Unauthorized");
   }
   const repository = createRepository(env);
@@ -1979,7 +2005,7 @@ async function handleOwnerNotificationDeliveryUpdate(
   request: Request,
   env: Env,
 ): Promise<Response> {
-  if (!authenticateBotService(request, env)) {
+  if (!(await authenticateBotService(request, env))) {
     return problemResponse(401, "unauthorized", "Unauthorized");
   }
   const repository = createRepository(env);
@@ -2012,7 +2038,7 @@ async function handleDiscordResponseMessageMetadata(
   request: Request,
   env: Env,
 ): Promise<Response> {
-  if (!authenticateBotService(request, env)) {
+  if (!(await authenticateBotService(request, env))) {
     return problemResponse(401, "unauthorized", "Unauthorized");
   }
   const repository = createRepository(env);

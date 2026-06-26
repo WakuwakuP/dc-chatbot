@@ -35,6 +35,7 @@ jobs:
           BOT_VPS_START_COMMAND: ${{ vars.BOT_VPS_START_COMMAND }}
           BOT_VPS_USER: ${{ secrets.BOT_VPS_USER }}
           CF_ACCESS_AUD: ${{ vars.CF_ACCESS_AUD }}
+          CF_BOT_ACCESS_AUD: ${{ vars.CF_BOT_ACCESS_AUD }}
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
           CF_TUNNEL_SSH_CLIENT_ID: ${{ secrets.CF_TUNNEL_SSH_CLIENT_ID }}
@@ -77,6 +78,7 @@ jobs:
           require_secret NVIDIA_NIM_BEARER_TOKEN "$NVIDIA_NIM_BEARER_TOKEN"
 
           require_var CF_ACCESS_AUD "$CF_ACCESS_AUD"
+          require_var CF_BOT_ACCESS_AUD "$CF_BOT_ACCESS_AUD"
           require_var CF_ACCESS_TEAM_DOMAIN "$CF_ACCESS_TEAM_DOMAIN"
           require_var CLOUDFLARE_D1_DATABASE_NAME "$CLOUDFLARE_D1_DATABASE_NAME"
           require_var CLOUDFLARE_D1_DATABASE_ID "$CLOUDFLARE_D1_DATABASE_ID"
@@ -221,6 +223,7 @@ jobs:
         env:
           API_WORKER_NAME: ${{ vars.API_WORKER_NAME }}
           CF_ACCESS_AUD: ${{ vars.CF_ACCESS_AUD }}
+          CF_BOT_ACCESS_AUD: ${{ vars.CF_BOT_ACCESS_AUD }}
           CF_ACCESS_TEAM_DOMAIN: ${{ vars.CF_ACCESS_TEAM_DOMAIN }}
           CLOUDFLARE_D1_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_DATABASE_ID }}
           CLOUDFLARE_D1_DATABASE_NAME: ${{ vars.CLOUDFLARE_D1_DATABASE_NAME }}
@@ -240,6 +243,7 @@ jobs:
           text = text.replace('database_id = "00000000-0000-0000-0000-000000000000"', f'database_id = "{os.environ["CLOUDFLARE_D1_DATABASE_ID"]}"')
           text = text.replace('CF_ACCESS_TEAM_DOMAIN = "replace-with-team.cloudflareaccess.com"', f'CF_ACCESS_TEAM_DOMAIN = {json.dumps(os.environ["CF_ACCESS_TEAM_DOMAIN"])}')
           text = text.replace('CF_ACCESS_AUD = "replace-with-access-application-aud"', f'CF_ACCESS_AUD = {json.dumps(os.environ["CF_ACCESS_AUD"])}')
+          text = text.replace('CF_BOT_ACCESS_AUD = "replace-with-bot-access-application-aud"', f'CF_BOT_ACCESS_AUD = {json.dumps(os.environ["CF_BOT_ACCESS_AUD"])}')
           text = text.replace('LLM_PROVIDER = "fake"', f'LLM_PROVIDER = {json.dumps(os.environ["LLM_PROVIDER"])}')
           if os.environ.get("NVIDIA_NIM_BASE_URL"):
               text = text.replace('# NVIDIA_NIM_BASE_URL = "https://integrate.api.nvidia.com/v1"', f'NVIDIA_NIM_BASE_URL = {json.dumps(os.environ["NVIDIA_NIM_BASE_URL"])}')

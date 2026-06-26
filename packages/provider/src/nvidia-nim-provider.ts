@@ -191,11 +191,21 @@ function buildMessages(
   ];
 
   for (const contextMessage of request.conversationContextMessages ?? []) {
-    const role =
-      contextMessage.authorRelation === "bot_self" ? "assistant" : "user";
+    if (contextMessage.authorRelation === "bot_self") {
+      messages.push({
+        role: "assistant",
+        content: contextMessage.content,
+      });
+      continue;
+    }
+
     messages.push({
-      role,
-      content: `[${contextMessage.authorRelation}] ${contextMessage.content}`,
+      role: "user",
+      content: [
+        `Context author relation: ${contextMessage.authorRelation}`,
+        "Message content:",
+        contextMessage.content,
+      ].join("\n"),
     });
   }
 

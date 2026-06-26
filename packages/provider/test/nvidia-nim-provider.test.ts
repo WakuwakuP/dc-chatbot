@@ -64,6 +64,62 @@ describe("NvidiaNimLLMProvider", () => {
     });
   });
 
+  it("does not prefix prior Bot replies with author relation labels", async () => {
+    const fetchMock = vi.fn(
+      async (_input: string | URL | Request, init: RequestInit | undefined) => {
+        const body = JSON.parse(String(init?.body)) as {
+          messages: readonly { role: string; content: string }[];
+        };
+
+        expect(body.messages).toEqual(
+          expect.arrayContaining([
+            { role: "assistant", content: "previous bot reply" },
+            {
+              role: "user",
+              content:
+                "Context author relation: trigger_user\nMessage content:\nnext user message",
+            },
+          ]),
+        );
+        expect(JSON.stringify(body)).not.toContain("[bot_self]");
+
+        return new Response(
+          JSON.stringify({
+            model: "meta/llama-3.1-70b-instruct",
+            choices: [{ message: { content: "ok" } }],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      },
+    );
+    const provider = new NvidiaNimLLMProvider({
+      bearerToken: "x",
+      fetch: fetchMock,
+      providerCallIdFactory: () => TEST_PROVIDER_CALL_ID,
+    });
+
+    await provider.generateResponse({
+      requestId: "01HY0000000000000000000000",
+      model: "meta/llama-3.1-70b-instruct",
+      triggerKind: "dm",
+      conversationContextMessageIds: ["100", "101"],
+      conversationContextMessages: [
+        {
+          messageId: "100",
+          authorRelation: "bot_self",
+          content: "previous bot reply",
+        },
+        {
+          messageId: "101",
+          authorRelation: "trigger_user",
+          content: "next user message",
+        },
+      ],
+    });
+
+    expect(fetchMock).toHaveBeenCalled();
+  });
+
   it("includes only safe attachment metadata in the transient provider payload", async () => {
     const fetchMock = vi.fn(
       async (_input: string | URL | Request, init: RequestInit | undefined) => {

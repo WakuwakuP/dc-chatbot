@@ -224,7 +224,7 @@ describe("Owner API client", () => {
     expect(calls[1]?.url).toContain(
       "/api/v1/owner/automated-trigger-sources/01J00000000000000000000000",
     );
-    expect(calls[1]?.init?.method).toBe("PUT");
+    expect(calls[1]?.init?.method).toBe("PATCH");
     expect(updated.replyMode).toBe("channel_message");
   });
 });

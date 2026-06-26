@@ -52,7 +52,7 @@ export type OwnerRequestOptions = {
 type FetchLike = typeof fetch;
 
 type RequestJsonOptions = OwnerRequestOptions & {
-  method?: "GET" | "POST" | "PUT" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
 };
 
@@ -514,7 +514,7 @@ export function createOwnerApiClient(fetchImpl: FetchLike = fetch) {
       requestJson(
         fetchImpl,
         "/settings/bot",
-        { ...options, method: "PUT", body: input },
+        { ...options, method: "PATCH", body: input },
         mapSettings,
       ),
     updateModelSettings: (
@@ -534,7 +534,7 @@ export function createOwnerApiClient(fetchImpl: FetchLike = fetch) {
       requestJson(
         fetchImpl,
         "/settings/prompts",
-        { ...options, method: "PUT", body: input },
+        { ...options, method: "POST", body: input },
         mapSettings,
       ),
     listAutomatedTriggerSources: (options: OwnerRequestOptions = {}) =>
@@ -562,7 +562,7 @@ export function createOwnerApiClient(fetchImpl: FetchLike = fetch) {
       requestJson(
         fetchImpl,
         `/automated-trigger-sources/${encodeURIComponent(automatedTriggerSourceId)}`,
-        { ...options, method: "PUT", body: input },
+        { ...options, method: "PATCH", body: input },
         mapAutomatedTriggerSource,
       ),
   };

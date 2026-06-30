@@ -2245,7 +2245,7 @@ async function routeRequest(request: Request, env: Env): Promise<Response> {
 
   if (
     url.pathname === "/api/v1/owner/settings/bot" &&
-    request.method === "PATCH"
+    (request.method === "PATCH" || request.method === "PUT")
   ) {
     return handleUpdateBotSettings(request, env);
   }

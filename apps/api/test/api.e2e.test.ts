@@ -1537,6 +1537,49 @@ describe("API Worker routes", () => {
     expect(await readJson(response)).toMatchObject({ code: "forbidden" });
   });
 
+  it("accepts PUT for Bot settings metadata mutation", async () => {
+    const db = new FakeD1Database();
+    const response = await worker.fetch(
+      new Request("https://api.test/api/v1/owner/settings/bot", {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+          "x-dev-access-subject": "admin@example.com",
+          "x-dev-auth-secret": LOCAL_AUTH_BYPASS_SECRET,
+        },
+        body: JSON.stringify({
+          notificationOwnerDiscordUserId: "999",
+          automatedTriggerDefaultCooldownSeconds: 120,
+        }),
+      }),
+      { ...env, DB: db as unknown as D1Database },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await readJson(response)).toMatchObject({
+      botSettings: {
+        notificationOwnerDiscordUserId: null,
+        automatedTriggerDefaultCooldownSeconds: 60,
+      },
+    });
+    expect(
+      dbCallsContaining(db, "INSERT INTO bot_settings").at(-1)?.bindings,
+    ).toEqual(["999", 120, expect.any(String), expect.any(String)]);
+    expect(
+      dbCallsContaining(db, "INSERT INTO setting_audit_metadata").at(-1)
+        ?.bindings,
+    ).toEqual([
+      expect.stringMatching(ULID_REGEX),
+      "999",
+      "bot_settings",
+      "bot_settings.updated",
+      null,
+      null,
+      expect.any(String),
+      expect.any(String),
+    ]);
+  });
+
   it("does not persist transient Discord message content from bot intake", async () => {
     const db = new FakeD1Database();
     const secretContent = "VERY_SECRET_TRANSIENT_MESSAGE_CONTENT";

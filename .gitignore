@@ -6,3 +6,4 @@ apps/api/.dev.vars
 .env
 .env.*
 !.env.example
+.pnpm-store/

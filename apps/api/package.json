@@ -20,13 +20,13 @@
     "@dc-chatbot/domain": "workspace:*",
     "@dc-chatbot/provider": "workspace:*",
     "@dc-chatbot/shared": "workspace:*",
-    "valibot": "^1.1.0"
+    "valibot": "^1.4.2"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260619.0",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
-    "vitest": "^3.2.4",
+    "vitest": "^5.0.4",
     "wrangler": "^4.51.0"
   }
 }

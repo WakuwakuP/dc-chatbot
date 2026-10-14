@@ -14,10 +14,10 @@
     "test:unit": "vitest run test --config ../../vitest.config.ts"
   },
   "dependencies": {
-    "valibot": "^1.1.0"
+    "valibot": "^1.4.2"
   },
   "devDependencies": {
     "typescript": "^5.9.3",
-    "vitest": "^3.2.4"
+    "vitest": "^5.0.4"
   }
 }

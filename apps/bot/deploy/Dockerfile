@@ -7,7 +7,7 @@ ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 
 RUN corepack enable
 
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json tsconfig.json vitest.config.ts ./
+COPY .npmrc package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json tsconfig.json vitest.config.ts ./
 COPY apps/bot/package.json apps/bot/package.json
 COPY packages/shared/package.json packages/shared/package.json
 

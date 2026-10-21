@@ -13,7 +13,7 @@ permissions:
 jobs:
   preflight:
     name: Deploy preflight
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     outputs:
       cloudflare_ready: ${{ steps.preflight.outputs.cloudflare_ready }}
       bot_deploy_target: ${{ steps.preflight.outputs.bot_deploy_target }}
@@ -21,7 +21,7 @@ jobs:
       smoke_ready: ${{ steps.preflight.outputs.smoke_ready }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
 
       - name: Validate deployment configuration
         id: preflight
@@ -140,10 +140,10 @@ jobs:
     name: Apply D1 migrations
     needs: preflight
     if: needs.preflight.outputs.cloudflare_ready == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -151,7 +151,7 @@ jobs:
           version: ${{ env.PNPM_VERSION }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7.1.0
         with:
           node-version-file: .node-version
           cache: pnpm
@@ -197,10 +197,10 @@ jobs:
   deploy_api:
     name: Deploy API Worker
     needs: d1_migrations
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -208,7 +208,7 @@ jobs:
           version: ${{ env.PNPM_VERSION }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7.1.0
         with:
           node-version-file: .node-version
           cache: pnpm
@@ -271,10 +271,10 @@ jobs:
   deploy_web:
     name: Deploy Web Pages
     needs: deploy_api
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -282,7 +282,7 @@ jobs:
           version: ${{ env.PNPM_VERSION }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7.1.0
         with:
           node-version-file: .node-version
           cache: pnpm
@@ -308,7 +308,7 @@ jobs:
       - preflight
       - deploy_web
     if: needs.preflight.outputs.bot_vps_ready == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: Configure SSH
         env:
@@ -394,7 +394,7 @@ jobs:
       - deploy_api
       - deploy_web
     if: needs.preflight.outputs.smoke_ready == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: Check API and Web endpoints
         env:
